@@ -79,7 +79,11 @@ cargo install asterai
 
 ### Setup asterbot
 
-TODO
+```bash
+asterai env init asterbot
+asterai env add-component asterbot asterai:llm
+asterai env run asterbot
+```
 
 ## 📄 License
 
