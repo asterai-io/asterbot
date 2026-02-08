@@ -33,23 +33,22 @@
 Asterbot is a hyper-modular AI agent built on WASM components.
 
 Think microkernel architecture for AI agents. Asterbot is just the orchestration
-core. LLM calls, tool,s memory, and planning are all swappable WASM components
+core. LLM calls, tools, memory, and planning are all swappable WASM components
 that can be retrieved and discovered from the public
 [asterai](https://github.com/asterai-io/asterai) WASM component registry.  
 
 ## 🔑 Why Asterbot
 
 - **Modular by default**: Swap out any piece
-  (LLM provider, tools, memory) without touching the rest
-- **Secure**: Every component runs in a WASI sandbox.
-  No full host access, no malicious tools
+  (LLM provider, tools, memory) without touching the rest.
+- **Secure**: Every component runs in a WASI sandbox. No full host access.
 - **Polyglot**: Components can be written in
   Rust, Go, Python, JS, C/C++ -- all interoperate
-  via typed WIT interfaces
+  via typed WIT interfaces.
 - **Portable**: Same components run locally or in the cloud,
-  no environment-specific config
+  no environment-specific config.
 - **Fast**: Rust core + near-native WASM execution.
-  Sub-millisecond component instantiation
+  Sub-millisecond component instantiation.
 
 ## 🌟⚔🦞 Asterbot vs OpenClaw 
 
