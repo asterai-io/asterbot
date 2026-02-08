@@ -170,7 +170,7 @@ Run:
 
 ```bash
 asterai env call asterbot --allow-dir ~/.asterbot \
-  asterbot:agent agent/converse '["hello!"]'
+  asterbot:agent agent/converse "hello!"
 ```
 
 The `--allow-dir` flag grants the agent filesystem access for
