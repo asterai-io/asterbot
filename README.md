@@ -62,6 +62,17 @@ that can be retrieved and discovered from the public
 
 [1]: https://thehackernews.com/2026/02/researchers-find-341-malicious-clawhub.html
 
+## 🧩 How it works
+
+Asterbot runs on [asterai](https://github.com/asterai-io/asterai), an open-source
+WASM component runtime and registry. Components are compiled to WASM, published to
+the registry, and composed into environments at runtime.
+
+Any component in the registry can be added as a tool. Write a component in Rust, Go,
+Python, or any language that compiles to WASM, publish it, and asterbot can call it.
+Components communicate through typed WIT interfaces and are sandboxed via WASI --
+they can't access host resources unless explicitly granted.
+
 ## 🚀 Getting Started
 
 ### Install the CLI
@@ -123,6 +134,7 @@ asterai env call asterbot --allow-dir ~/.asterbot \
 
 The `--allow-dir` flag grants the agent filesystem access for
 persistent memory, skills, and conversation history.
+
 
 ## 📄 License
 
