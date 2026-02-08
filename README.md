@@ -35,32 +35,7 @@ Asterbot is a hyper-modular AI agent built on WASM components.
 Think microkernel architecture for AI agents. Asterbot is just the orchestration
 core. LLM calls, tools, memory, and planning are all swappable WASM components
 that can be retrieved and discovered from the public
-[asterai](https://github.com/asterai-io/asterai) WASM component registry.  
-
-## 🔑 Why Asterbot
-
-- **Modular by default**: Swap out any piece
-  (LLM provider, tools, memory) without touching the rest.
-- **Secure**: Every component runs in a WASI sandbox. No full host access.
-- **Polyglot**: Components can be written in
-  Rust, Go, Python, JS, C/C++ -- all interoperate
-  via typed WIT interfaces.
-- **Portable**: Same components run locally or in the cloud,
-  no environment-specific config.
-- **Fast**: Rust core + near-native WASM execution.
-  Sub-millisecond component instantiation.
-
-## 🌟⚔🦞 Asterbot vs OpenClaw 
-
-|                  | Asterbot                          | OpenClaw                                     |
-|------------------|-----------------------------------|----------------------------------------------|
-| Language         | Any (via WASM)                    | TypeScript only                              |
-| Tool security    | WASI sandboxed per component      | Full host access ([341 malicious skills][1]) |
-| Tool portability | Framework-agnostic, runs anywhere | OpenClaw-only                                |
-| Registry         | asterai -- any language           | ClawHub -- TypeScript only                   |
-| Architecture     | Thin core + swappable components  | Monolithic TypeScript monorepo               |
-
-[1]: https://thehackernews.com/2026/02/researchers-find-341-malicious-clawhub.html
+[asterai](https://github.com/asterai-io/asterai) WASM component registry.
 
 ## 🏗 Architecture
 
@@ -99,22 +74,7 @@ All inter-component calls use dynamic dispatch (`call-component-function`
 with JSON args). No component knows about the others at compile time —
 swap any piece by changing an env var.
 
-## 🧩 How it works
-
-Asterbot runs on [asterai](https://github.com/asterai-io/asterai), an open-source
-WASM component runtime and registry. Components are compiled to WASM, published to
-the registry, and composed into environments at runtime.
-
-Any component in the registry can be added as a tool. Write a component in Rust, Go,
-Python, or any language that compiles to WASM, publish it, and asterbot can call it.
-Components communicate through typed WIT interfaces and are sandboxed via WASI --
-they can't access host resources unless explicitly granted.
-
-All asterbot components are published to the registry and can be browsed at
-[asterai.io/asterbot](https://asterai.io/asterbot)
-(e.g. [asterbot:memory](https://asterai.io/asterbot/memory)).
-
-## 🚀 Getting Started
+## 🚀 Quick Start
 
 ### Install the CLI
 There are two options, both will install the same CLI:
@@ -211,6 +171,46 @@ conversation.json  memory/
 $ cat ~/.asterbot/memory/user_favorite_programming_language.md
 Rust
 ```
+
+## 🧩 How it works
+
+Asterbot runs on [asterai](https://github.com/asterai-io/asterai), an open-source
+WASM component runtime and registry. Components are compiled to WASM, published to
+the registry, and composed into environments at runtime.
+
+Any component in the registry can be added as a tool. Write a component in Rust, Go,
+Python, or any language that compiles to WASM, publish it, and asterbot can call it.
+Components communicate through typed WIT interfaces and are sandboxed via WASI --
+they can't access host resources unless explicitly granted.
+
+All asterbot components are published to the registry and can be browsed at
+[asterai.io/asterbot](https://asterai.io/asterbot)
+(e.g. [asterbot:memory](https://asterai.io/asterbot/memory)).
+
+## 🔑 Why Asterbot
+
+- **Modular by default**: Swap out any piece
+  (LLM provider, tools, memory) without touching the rest.
+- **Secure**: Every component runs in a WASI sandbox. No full host access.
+- **Polyglot**: Components can be written in
+  Rust, Go, Python, JS, C/C++ -- all interoperate
+  via typed WIT interfaces.
+- **Portable**: Same components run locally or in the cloud,
+  no environment-specific config.
+- **Fast**: Rust core + near-native WASM execution.
+  Sub-millisecond component instantiation.
+
+## 🌟⚔🦞 Asterbot vs OpenClaw
+
+|                  | Asterbot                          | OpenClaw                                     |
+|------------------|-----------------------------------|----------------------------------------------|
+| Language         | Any (via WASM)                    | TypeScript only                              |
+| Tool security    | WASI sandboxed per component      | Full host access ([341 malicious skills][1]) |
+| Tool portability | Framework-agnostic, runs anywhere | OpenClaw-only                                |
+| Registry         | asterai -- any language           | ClawHub -- TypeScript only                   |
+| Architecture     | Thin core + swappable components  | Monolithic TypeScript monorepo               |
+
+[1]: https://thehackernews.com/2026/02/researchers-find-341-malicious-clawhub.html
 
 ## 📄 License
 
