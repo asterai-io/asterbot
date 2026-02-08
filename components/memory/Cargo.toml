@@ -1,0 +1,23 @@
+[package]
+name = "asterbot-memory"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+wit-bindgen-rt = { version = "0.44.0", features = ["bitflags"] }
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+codegen-units = 1
+opt-level = "s"
+debug = false
+strip = true
+lto = true
+
+[package.metadata.component]
+package = "asterbot:memory"
+
+[package.metadata.component.dependencies]

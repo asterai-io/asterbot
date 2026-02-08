@@ -1,0 +1,6 @@
+package asterbot:skills@1.0.0;
+
+world component {
+  import asterai:host/api@1.0.0;
+  export asterbot:types/skills@1.0.0;
+}
