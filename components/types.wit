@@ -1,4 +1,4 @@
-package asterbot:interface@1.0.0;
+package asterbot:types@1.0.0;
 
 /// Shared types used across asterbot components.
 interface types {
@@ -64,4 +64,8 @@ interface toolkit {
   /// Format all available tools as a text block
   /// suitable for inclusion in an LLM system prompt.
   format-tools-for-prompt: func() -> string;
+}
+
+world asterbot {
+  export types;
 }
