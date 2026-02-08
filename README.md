@@ -135,6 +135,41 @@ asterai env call asterbot --allow-dir ~/.asterbot \
 The `--allow-dir` flag grants the agent filesystem access for
 persistent memory, skills, and conversation history.
 
+### Example
+
+```
+$ asterai env call asterbot --allow-dir ~/.asterbot \
+    asterbot:agent agent/converse \
+    "hi! can you remember my favourite programming language is rust"
+
+calling env lorenzo:asterbot's asterbot:agent component function agent/converse
+allowed directories:
+  /home/lorenzo/.asterbot
+compiling asterbot:core@1.0.0... done.
+compiling asterbot:memory@1.0.0... done.
+compiling asterai:firecrawl@0.1.0... done.
+compiling asterbot:soul@1.0.0... done.
+compiling asterbot:skills@1.0.0... done.
+compiling asterai:llm@1.0.0... done.
+compiling asterbot:toolkit@1.0.0... done.
+compiling asterbot:agent@1.0.0... done.
+
+Hi! 👋 I've saved that your favorite programming language is Rust!
+That's a great choice - Rust is known for its memory safety, performance,
+and excellent tooling. I'll remember this for our future conversations.
+Is there anything else you'd like me to help you with?
+```
+
+The agent used the memory tool to persist this. We can inspect the
+state directory:
+
+```
+$ ls ~/.asterbot/
+conversation.json  memory/
+
+$ cat ~/.asterbot/memory/user_favorite_programming_language.md
+Rust
+```
 
 ## 📄 License
 
