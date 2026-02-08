@@ -79,11 +79,50 @@ cargo install asterai
 
 ### Setup asterbot
 
+Create an environment and add the core components:
+
 ```bash
 asterai env init asterbot
+
+# Core
+asterai env add-component asterbot asterbot:agent
+asterai env add-component asterbot asterbot:core
+asterai env add-component asterbot asterbot:toolkit
 asterai env add-component asterbot asterai:llm
-asterai env run asterbot
+
+# Capabilities
+asterai env add-component asterbot asterbot:soul
+asterai env add-component asterbot asterbot:memory
+asterai env add-component asterbot asterbot:skills
+
+# Tools (example -- you can add any component as a tool)
+asterai env add-component asterbot asterai:firecrawl
 ```
+
+Configure:
+
+```bash
+# LLM provider (pick any — OpenAI, Anthropic, Mistral, etc.)
+asterai env set-var asterbot ASTERBOT_MODEL="anthropic/claude-sonnet-4-5"
+asterai env set-var asterbot ANTHROPIC_KEY="sk-..."
+
+# Enable tools the agent can use
+# This will also enable the Firecrawl component as a tool.
+asterai env set-var asterbot ASTERBOT_TOOLS="asterbot:soul,asterbot:memory,asterbot:skills,asterai:firecrawl"
+
+# Firecrawl API key (for web search/scrape)
+asterai env set-var asterbot FIRECRAWL_KEY="fc-..."
+```
+
+Run:
+
+```bash
+asterai env call asterbot --allow-dir ~/.asterbot \
+  asterbot:agent agent/converse '["hello!"]'
+```
+
+The `--allow-dir` flag grants the agent filesystem access for
+persistent memory, skills, and conversation history.
 
 ## 📄 License
 
