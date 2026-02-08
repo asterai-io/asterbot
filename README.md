@@ -62,6 +62,43 @@ that can be retrieved and discovered from the public
 
 [1]: https://thehackernews.com/2026/02/researchers-find-341-malicious-clawhub.html
 
+## 🏗 Architecture
+
+```
+User
+ │
+ │  converse("hello")
+ ▼
+┌──────────────────┐
+│  asterbot:agent   │  Stable entrypoint. Delegates to core.
+└────────┬─────────┘
+         │  call-component-function (dynamic dispatch)
+         ▼
+┌──────────────────┐
+│  asterbot:core    │  The brain. Agent loop: build prompt,
+└──┬──────┬────────┘  call LLM, parse tool calls, loop.
+   │      │
+   │      ▼
+   │  ┌──────────────────┐
+   │  │ asterbot:toolkit  │  Discovers tools in the environment
+   │  └──┬───────────────┘  via host API reflection.
+   │     │
+   │     ▼
+   │  ┌──────────────────┐
+   │  │ Tool components   │  Any WASM component: web search,
+   │  │ (user-provided)   │  memory, skills, soul, APIs, ...
+   │  └──────────────────┘
+   │
+   ▼
+┌──────────────────┐
+│  asterai:llm      │  12 LLM providers. One interface.
+└──────────────────┘
+```
+
+All inter-component calls use dynamic dispatch (`call-component-function`
+with JSON args). No component knows about the others at compile time —
+swap any piece by changing an env var.
+
 ## 🧩 How it works
 
 Asterbot runs on [asterai](https://github.com/asterai-io/asterai), an open-source
