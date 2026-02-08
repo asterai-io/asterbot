@@ -1,5 +1,5 @@
 use crate::bindings::asterai::host::api;
-use crate::bindings::exports::asterbot::core::core::Guest;
+use crate::bindings::exports::asterbot::types::core::Guest;
 use serde::{Deserialize, Serialize};
 
 #[allow(warnings)]
@@ -31,14 +31,22 @@ impl Guest for Component {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_MAX_MESSAGES);
-        let mut history = load_history();
+        let host_dir = match std::env::var("ASTERBOT_HOST_DIR") {
+            Ok(v) if !v.is_empty() => v,
+            _ => {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                format!("{home}/.asterbot")
+            }
+        };
+        let _ = std::fs::create_dir_all(&host_dir);
+        let mut history = load_history(&host_dir);
         history.push(Message {
             role: "user".to_string(),
             content: input,
         });
         trim_history(&mut history, max_messages);
         let tool_descriptions = get_tool_descriptions();
-        let system_prompt = resolve_system_prompt();
+        let system_prompt = resolve_system_prompt(&host_dir);
         let mut rounds_remaining = max_tool_rounds;
         loop {
             let prompt = build_prompt(&system_prompt, &tool_descriptions, &history);
@@ -46,7 +54,7 @@ impl Guest for Component {
                 Ok(r) => r,
                 Err(e) => {
                     let msg = format!("error: LLM call failed: {e}");
-                    save_history(&history);
+                    save_history(&host_dir, &history);
                     return msg;
                 }
             };
@@ -55,7 +63,7 @@ impl Guest for Component {
                     role: "assistant".to_string(),
                     content: response.clone(),
                 });
-                save_history(&history);
+                save_history(&host_dir, &history);
                 return response;
             };
             history.push(Message {
@@ -74,7 +82,7 @@ impl Guest for Component {
                     role: "assistant".to_string(),
                     content: msg.clone(),
                 });
-                save_history(&history);
+                save_history(&host_dir, &history);
                 return msg;
             }
         }
@@ -108,8 +116,9 @@ fn build_prompt(system_prompt: &str, tool_descriptions: &str, history: &[Message
     prompt
 }
 
-fn resolve_system_prompt() -> String {
-    if let Ok(contents) = std::fs::read_to_string("./system-prompt.txt") {
+fn resolve_system_prompt(host_dir: &str) -> String {
+    let path = format!("{host_dir}/system-prompt.txt");
+    if let Ok(contents) = std::fs::read_to_string(&path) {
         if !contents.trim().is_empty() {
             return contents;
         }
@@ -162,8 +171,9 @@ fn extract_tag(text: &str, tag: &str) -> Option<String> {
     Some(text[start..end].trim().to_string())
 }
 
-fn load_history() -> Vec<Message> {
-    match std::fs::read_to_string("./conversation.json") {
+fn load_history(host_dir: &str) -> Vec<Message> {
+    let path = format!("{host_dir}/conversation.json");
+    match std::fs::read_to_string(&path) {
         Ok(contents) if !contents.trim().is_empty() => serde_json::from_str(&contents)
             .unwrap_or_else(|e| {
                 eprintln!("error: failed to parse conversation.json: {e}");
@@ -174,10 +184,11 @@ fn load_history() -> Vec<Message> {
     }
 }
 
-fn save_history(history: &[Message]) {
+fn save_history(host_dir: &str, history: &[Message]) {
+    let path = format!("{host_dir}/conversation.json");
     match serde_json::to_string_pretty(history) {
         Ok(json) => {
-            if let Err(e) = std::fs::write("./conversation.json", json) {
+            if let Err(e) = std::fs::write(&path, json) {
                 eprintln!("error: failed to write conversation.json: {e}");
             }
         }

@@ -997,19 +997,16 @@ pub mod asterai {
 #[rustfmt::skip]
 #[allow(dead_code, clippy::all)]
 pub mod asterbot {
-    pub mod toolkit {
+    pub mod types {
         #[allow(dead_code, clippy::all)]
         pub mod types {
             #[used]
             #[doc(hidden)]
             static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
             use super::super::super::_rt;
-            /// Describes a parameter of a tool function.
             #[derive(Clone)]
             pub struct ToolParam {
-                /// Parameter name.
                 pub name: _rt::String,
-                /// Type name (e.g. "string", "u32", "list<string>").
                 pub type_name: _rt::String,
             }
             impl ::core::fmt::Debug for ToolParam {
@@ -1023,19 +1020,12 @@ pub mod asterbot {
                         .finish()
                 }
             }
-            /// Describes a callable tool function.
             #[derive(Clone)]
             pub struct ToolInfo {
-                /// Component name (e.g. "asterai:http-client").
                 pub component_name: _rt::String,
-                /// Function name including interface
-                /// (e.g. "http/get").
                 pub function_name: _rt::String,
-                /// Human-readable description from WIT /// docs.
                 pub description: _rt::String,
-                /// The function's parameters.
                 pub params: _rt::Vec<ToolParam>,
-                /// Return type name (e.g. "string", "list<u8>").
                 pub return_type: _rt::String,
             }
             impl ::core::fmt::Debug for ToolInfo {
@@ -1059,14 +1049,14 @@ pub mod asterbot {
 #[allow(dead_code, clippy::all)]
 pub mod exports {
     pub mod asterbot {
-        pub mod toolkit {
+        pub mod types {
             #[allow(dead_code, clippy::all)]
             pub mod toolkit {
                 #[used]
                 #[doc(hidden)]
                 static __FORCE_SECTION_REF: fn() = super::super::super::super::__link_custom_section_describing_imports;
                 use super::super::super::super::_rt;
-                pub type ToolInfo = super::super::super::super::asterbot::toolkit::types::ToolInfo;
+                pub type ToolInfo = super::super::super::super::asterbot::types::types::ToolInfo;
                 #[doc(hidden)]
                 #[allow(non_snake_case)]
                 pub unsafe fn _export_list_tools_cabi<T: Guest>() -> *mut u8 {
@@ -1091,7 +1081,7 @@ pub mod exports {
                     for (i, e) in vec11.into_iter().enumerate() {
                         let base = result11.add(i * 40);
                         {
-                            let super::super::super::super::asterbot::toolkit::types::ToolInfo {
+                            let super::super::super::super::asterbot::types::types::ToolInfo {
                                 component_name: component_name2,
                                 function_name: function_name2,
                                 description: description2,
@@ -1134,7 +1124,7 @@ pub mod exports {
                             for (i, e) in vec9.into_iter().enumerate() {
                                 let base = result9.add(i * 16);
                                 {
-                                    let super::super::super::super::asterbot::toolkit::types::ToolParam {
+                                    let super::super::super::super::asterbot::types::types::ToolParam {
                                         name: name6,
                                         type_name: type_name6,
                                     } = e;
@@ -1270,50 +1260,45 @@ pub mod exports {
                     _rt::cabi_dealloc(l0, l1, 1);
                 }
                 pub trait Guest {
-                    /// List all available tools with descriptions.
                     fn list_tools() -> _rt::Vec<ToolInfo>;
-                    /// Call a tool function. Returns the result as a string.
                     fn call_tool(
                         component_name: _rt::String,
                         function_name: _rt::String,
                         args_json: _rt::String,
                     ) -> _rt::String;
-                    /// Format all available tools as a text block
-                    /// suitable for inclusion in an LLM system prompt.
                     fn format_tools_for_prompt() -> _rt::String;
                 }
                 #[doc(hidden)]
-                macro_rules! __export_asterbot_toolkit_toolkit_1_0_0_cabi {
+                macro_rules! __export_asterbot_types_toolkit_1_0_0_cabi {
                     ($ty:ident with_types_in $($path_to_types:tt)*) => {
                         const _ : () = { #[export_name =
-                        "asterbot:toolkit/toolkit@1.0.0#list-tools"] unsafe extern "C" fn
+                        "asterbot:types/toolkit@1.0.0#list-tools"] unsafe extern "C" fn
                         export_list_tools() -> * mut u8 { $($path_to_types)*::
                         _export_list_tools_cabi::<$ty > () } #[export_name =
-                        "cabi_post_asterbot:toolkit/toolkit@1.0.0#list-tools"] unsafe
+                        "cabi_post_asterbot:types/toolkit@1.0.0#list-tools"] unsafe
                         extern "C" fn _post_return_list_tools(arg0 : * mut u8,) {
                         $($path_to_types)*:: __post_return_list_tools::<$ty > (arg0) }
-                        #[export_name = "asterbot:toolkit/toolkit@1.0.0#call-tool"]
-                        unsafe extern "C" fn export_call_tool(arg0 : * mut u8, arg1 :
-                        usize, arg2 : * mut u8, arg3 : usize, arg4 : * mut u8, arg5 :
-                        usize,) -> * mut u8 { $($path_to_types)*::
-                        _export_call_tool_cabi::<$ty > (arg0, arg1, arg2, arg3, arg4,
-                        arg5) } #[export_name =
-                        "cabi_post_asterbot:toolkit/toolkit@1.0.0#call-tool"] unsafe
-                        extern "C" fn _post_return_call_tool(arg0 : * mut u8,) {
+                        #[export_name = "asterbot:types/toolkit@1.0.0#call-tool"] unsafe
+                        extern "C" fn export_call_tool(arg0 : * mut u8, arg1 : usize,
+                        arg2 : * mut u8, arg3 : usize, arg4 : * mut u8, arg5 : usize,) ->
+                        * mut u8 { $($path_to_types)*:: _export_call_tool_cabi::<$ty >
+                        (arg0, arg1, arg2, arg3, arg4, arg5) } #[export_name =
+                        "cabi_post_asterbot:types/toolkit@1.0.0#call-tool"] unsafe extern
+                        "C" fn _post_return_call_tool(arg0 : * mut u8,) {
                         $($path_to_types)*:: __post_return_call_tool::<$ty > (arg0) }
                         #[export_name =
-                        "asterbot:toolkit/toolkit@1.0.0#format-tools-for-prompt"] unsafe
+                        "asterbot:types/toolkit@1.0.0#format-tools-for-prompt"] unsafe
                         extern "C" fn export_format_tools_for_prompt() -> * mut u8 {
                         $($path_to_types)*:: _export_format_tools_for_prompt_cabi::<$ty >
                         () } #[export_name =
-                        "cabi_post_asterbot:toolkit/toolkit@1.0.0#format-tools-for-prompt"]
+                        "cabi_post_asterbot:types/toolkit@1.0.0#format-tools-for-prompt"]
                         unsafe extern "C" fn _post_return_format_tools_for_prompt(arg0 :
                         * mut u8,) { $($path_to_types)*::
                         __post_return_format_tools_for_prompt::<$ty > (arg0) } };
                     };
                 }
                 #[doc(hidden)]
-                pub(crate) use __export_asterbot_toolkit_toolkit_1_0_0_cabi;
+                pub(crate) use __export_asterbot_types_toolkit_1_0_0_cabi;
                 #[repr(align(4))]
                 struct _RetArea([::core::mem::MaybeUninit<u8>; 8]);
                 static mut _RET_AREA: _RetArea = _RetArea(
@@ -1390,8 +1375,8 @@ macro_rules! __export_component_impl {
     };
     ($ty:ident with_types_in $($path_to_types_root:tt)*) => {
         $($path_to_types_root)*::
-        exports::asterbot::toolkit::toolkit::__export_asterbot_toolkit_toolkit_1_0_0_cabi!($ty
-        with_types_in $($path_to_types_root)*:: exports::asterbot::toolkit::toolkit);
+        exports::asterbot::types::toolkit::__export_asterbot_types_toolkit_1_0_0_cabi!($ty
+        with_types_in $($path_to_types_root)*:: exports::asterbot::types::toolkit);
     };
 }
 #[doc(inline)]
@@ -1399,8 +1384,8 @@ pub(crate) use __export_component_impl as export;
 #[cfg(target_arch = "wasm32")]
 #[link_section = "component-type:wit-bindgen:0.36.0:asterbot:toolkit@1.0.0:component:encoded world"]
 #[doc(hidden)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1235] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xd3\x08\x01A\x02\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1231] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xcf\x08\x01A\x02\x01\
 A\x07\x01B!\x01r\x01\x07versions\x04\0\x0cruntime-info\x03\0\0\x01r\x03\x04names\
 \x09type-names\x0btype-schemas\x04\0\x0aparam-info\x03\0\x02\x01r\x02\x09type-na\
 mes\x0btype-schemas\x04\0\x09type-info\x03\0\x04\x01ks\x01p\x03\x01k\x05\x01r\x05\
@@ -1417,14 +1402,14 @@ onent-implements\x01\x18\x01j\x01s\x01\x12\x01@\x03\x0ecomponent-names\x0dfuncti
 on-names\x09args-jsons\0\x19\x04\0\x17call-component-function\x01\x1a\x03\0\x16a\
 sterai:host/api@1.0.0\x05\0\x01B\x05\x01r\x02\x04names\x09type-names\x04\0\x0ato\
 ol-param\x03\0\0\x01p\x01\x01r\x05\x0ecomponent-names\x0dfunction-names\x0bdescr\
-iptions\x06params\x02\x0breturn-types\x04\0\x09tool-info\x03\0\x03\x03\0\x1caste\
-rbot:toolkit/types@1.0.0\x05\x01\x02\x03\0\x01\x09tool-info\x01B\x09\x02\x03\x02\
-\x01\x02\x04\0\x09tool-info\x03\0\0\x01p\x01\x01@\0\0\x02\x04\0\x0alist-tools\x01\
-\x03\x01@\x03\x0ecomponent-names\x0dfunction-names\x09args-jsons\0s\x04\0\x09cal\
-l-tool\x01\x04\x01@\0\0s\x04\0\x17format-tools-for-prompt\x01\x05\x04\0\x1easter\
-bot:toolkit/toolkit@1.0.0\x05\x03\x04\0\x20asterbot:toolkit/component@1.0.0\x04\0\
-\x0b\x0f\x01\0\x09component\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dw\
-it-component\x070.220.0\x10wit-bindgen-rust\x060.36.0";
+iptions\x06params\x02\x0breturn-types\x04\0\x09tool-info\x03\0\x03\x03\0\x1aaste\
+rbot:types/types@1.0.0\x05\x01\x02\x03\0\x01\x09tool-info\x01B\x09\x02\x03\x02\x01\
+\x02\x04\0\x09tool-info\x03\0\0\x01p\x01\x01@\0\0\x02\x04\0\x0alist-tools\x01\x03\
+\x01@\x03\x0ecomponent-names\x0dfunction-names\x09args-jsons\0s\x04\0\x09call-to\
+ol\x01\x04\x01@\0\0s\x04\0\x17format-tools-for-prompt\x01\x05\x04\0\x1casterbot:\
+types/toolkit@1.0.0\x05\x03\x04\0\x20asterbot:toolkit/component@1.0.0\x04\0\x0b\x0f\
+\x01\0\x09component\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-compo\
+nent\x070.220.0\x10wit-bindgen-rust\x060.36.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

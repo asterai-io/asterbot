@@ -1,6 +1,6 @@
 use crate::bindings::asterai::host::api;
-use crate::bindings::asterbot::toolkit::types::ToolParam;
-use crate::bindings::exports::asterbot::toolkit::toolkit::{Guest, ToolInfo};
+use crate::bindings::asterbot::types::types::ToolParam;
+use crate::bindings::exports::asterbot::types::toolkit::{Guest, ToolInfo};
 
 #[allow(warnings)]
 mod bindings;

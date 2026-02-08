@@ -1,5 +1,5 @@
 use crate::bindings::asterai::host::api;
-use crate::bindings::exports::asterbot::agent::agent::Guest;
+use crate::bindings::exports::asterbot::types::agent::Guest;
 
 #[allow(warnings)]
 mod bindings;

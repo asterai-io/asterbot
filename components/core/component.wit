@@ -1,14 +1,6 @@
 package asterbot:core@1.0.0;
 
-interface core {
-  /// Run the agent loop for the given input.
-  /// Reads/writes conversation history and state
-  /// from the filesystem. Returns the assistant's
-  /// final response.
-  converse: func(input: string) -> string;
-}
-
 world component {
   import asterai:host/api@1.0.0;
-  export core;
+  export asterbot:types/core@1.0.0;
 }
