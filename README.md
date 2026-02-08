@@ -8,7 +8,7 @@
 <h3 align="center"><b>Asterbot</b></h3>
 <p align="center">
     <b>A hyper-modular AI agent built on WASM components.</b><br />
-    Every capability is a swappable component from the asterai registry.
+    Every capability is a swappable component. Written in any language.
 </p>
 
 <div align="center">
