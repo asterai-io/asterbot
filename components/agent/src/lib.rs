@@ -16,7 +16,7 @@ impl Guest for Component {
         let input_json = serde_json::to_string(&input).unwrap_or_default();
         let args = format!("[{input_json}]");
         match api::call_component_function(core, "core/converse", &args) {
-            Ok(output) => output,
+            Ok(output) => serde_json::from_str::<String>(&output).unwrap_or_else(|_| output),
             Err(e) => format!("error: core component '{}' failed: {}", core, e.message,),
         }
     }

@@ -16,6 +16,8 @@ struct Message {
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
 const DEFAULT_MAX_TOOL_ROUNDS: usize = 10;
 const DEFAULT_MAX_MESSAGES: usize = 100;
+const DEFAULT_MAX_PROMPT_CHARS: usize = 24000;
+const TOOL_RESULT_TRUNCATE_CHARS: usize = 2000;
 
 impl Guest for Component {
     fn converse(input: String) -> String {
@@ -86,9 +88,13 @@ impl Guest for Component {
 }
 
 fn build_prompt(system_prompt: &str, tool_descriptions: &str, history: &[Message]) -> String {
-    let mut prompt = system_prompt.to_string();
+    let max_chars = std::env::var("ASTERBOT_MAX_PROMPT_CHARS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_MAX_PROMPT_CHARS);
+    let mut preamble = system_prompt.to_string();
     if !tool_descriptions.is_empty() && tool_descriptions != "No tools available." {
-        prompt.push_str(
+        preamble.push_str(
             "\n\n\
             You have access to tools. To call a tool, respond with\n\
             exactly one XML block:\n\
@@ -103,11 +109,33 @@ fn build_prompt(system_prompt: &str, tool_descriptions: &str, history: &[Message
             then respond to the user or call another tool.\n\
             \n",
         );
-        prompt.push_str(tool_descriptions);
+        preamble.push_str(tool_descriptions);
     }
-    prompt.push_str("\n\nConversation:\n");
-    for msg in history {
-        prompt.push_str(&format!("{}: {}\n", msg.role, msg.content));
+    preamble.push_str("\n\nConversation:\n");
+    let remaining = max_chars.saturating_sub(preamble.len());
+    let mut lines: Vec<String> = Vec::new();
+    let mut used = 0;
+    for msg in history.iter().rev() {
+        let content = if msg.role == "tool_result" && msg.content.len() > TOOL_RESULT_TRUNCATE_CHARS
+        {
+            format!(
+                "{}... (truncated)",
+                &msg.content[..TOOL_RESULT_TRUNCATE_CHARS]
+            )
+        } else {
+            msg.content.clone()
+        };
+        let line = format!("{}: {}\n", msg.role, content);
+        if used + line.len() > remaining && !lines.is_empty() {
+            break;
+        }
+        used += line.len();
+        lines.push(line);
+    }
+    lines.reverse();
+    let mut prompt = preamble;
+    for line in &lines {
+        prompt.push_str(line);
     }
     prompt
 }
@@ -144,9 +172,16 @@ fn resolve_system_prompt(host_dir: &str) -> String {
     std::env::var("ASTERBOT_SYSTEM_PROMPT").unwrap_or_else(|_| DEFAULT_SYSTEM_PROMPT.to_string())
 }
 
+fn decode_json_string(json: &str) -> String {
+    serde_json::from_str::<String>(json).unwrap_or_else(|_| json.to_string())
+}
+
 fn get_tool_descriptions() -> String {
-    api::call_component_function("asterbot:toolkit", "toolkit/format-tools-for-prompt", "[]")
-        .unwrap_or_default()
+    match api::call_component_function("asterbot:toolkit", "toolkit/format-tools-for-prompt", "[]")
+    {
+        Ok(result) => decode_json_string(&result),
+        Err(_) => String::new(),
+    }
 }
 
 fn call_llm(prompt: &str, model: &str) -> Result<String, String> {
@@ -154,6 +189,7 @@ fn call_llm(prompt: &str, model: &str) -> Result<String, String> {
     let model_json = serde_json::to_string(model).map_err(|e| e.to_string())?;
     let args = format!("[{prompt_json}, {model_json}]");
     api::call_component_function("asterai:llm", "llm/prompt", &args)
+        .map(|r| decode_json_string(&r))
         .map_err(|e| format!("{:?}: {}", e.kind, e.message))
 }
 
@@ -162,8 +198,10 @@ fn call_tool(component: &str, function: &str, args: &str) -> String {
     let function_json = serde_json::to_string(function).unwrap_or_default();
     let args_json = serde_json::to_string(args).unwrap_or_default();
     let call_args = format!("[{component_json}, {function_json}, {args_json}]");
-    api::call_component_function("asterbot:toolkit", "toolkit/call-tool", &call_args)
-        .unwrap_or_else(|e| format!("error: tool call failed: {:?}: {}", e.kind, e.message))
+    match api::call_component_function("asterbot:toolkit", "toolkit/call-tool", &call_args) {
+        Ok(result) => decode_json_string(&result),
+        Err(e) => format!("error: tool call failed: {:?}: {}", e.kind, e.message),
+    }
 }
 
 struct ToolCall {

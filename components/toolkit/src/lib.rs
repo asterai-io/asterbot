@@ -1,6 +1,7 @@
 use crate::bindings::asterai::host::api;
 use crate::bindings::asterbot::types::types::ToolParam;
 use crate::bindings::exports::asterbot::types::toolkit::{Guest, ToolInfo};
+use serde_json::Value;
 
 #[allow(warnings)]
 mod bindings;
@@ -58,7 +59,8 @@ impl Guest for Component {
                 component_name,
             );
         }
-        match api::call_component_function(&component_name, &function_name, &args_json) {
+        let args = convert_args_to_array(&component_name, &function_name, &args_json);
+        match api::call_component_function(&component_name, &function_name, &args) {
             Ok(result) => result,
             Err(e) => format!(
                 "error: {}/{} failed ({:?}): {}",
@@ -91,6 +93,42 @@ impl Guest for Component {
         }
         out
     }
+}
+
+fn convert_args_to_array(component: &str, function: &str, args_json: &str) -> String {
+    let Ok(value) = serde_json::from_str::<Value>(args_json) else {
+        return args_json.to_string();
+    };
+    if value.is_array() {
+        return args_json.to_string();
+    }
+    let Some(obj) = value.as_object() else {
+        return format!("[{args_json}]");
+    };
+    let Some(info) = api::get_component(component) else {
+        return args_json.to_string();
+    };
+    let (iface_name, func_name) = match function.split_once('/') {
+        Some((i, f)) => (Some(i), f),
+        None => (None, function),
+    };
+    let func = info
+        .functions
+        .iter()
+        .find(|f| f.name == func_name && f.interface_name.as_deref() == iface_name);
+    let Some(func) = func else {
+        return args_json.to_string();
+    };
+    let arr: Vec<&Value> = func
+        .inputs
+        .iter()
+        .map(|p| {
+            obj.get(&p.name)
+                .or_else(|| obj.get(&p.name.replace('-', "_")))
+                .unwrap_or(&Value::Null)
+        })
+        .collect();
+    serde_json::to_string(&arr).unwrap_or_else(|_| args_json.to_string())
 }
 
 fn tool_component_names() -> Vec<String> {
