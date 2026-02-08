@@ -31,14 +31,10 @@ impl Guest for Component {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_MAX_MESSAGES);
-        let host_dir = match std::env::var("ASTERBOT_HOST_DIR") {
-            Ok(v) if !v.is_empty() => v,
-            _ => {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                format!("{home}/.asterbot")
-            }
+        let host_dir = match resolve_host_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
         };
-        let _ = std::fs::create_dir_all(&host_dir);
         let mut history = load_history(&host_dir);
         history.push(Message {
             role: "user".to_string(),
@@ -114,6 +110,28 @@ fn build_prompt(system_prompt: &str, tool_descriptions: &str, history: &[Message
         prompt.push_str(&format!("{}: {}\n", msg.role, msg.content));
     }
     prompt
+}
+
+fn resolve_host_dir() -> Result<String, String> {
+    if let Ok(v) = std::env::var("ASTERBOT_HOST_DIR") {
+        if !v.is_empty() {
+            return Ok(v);
+        }
+    }
+    if let Ok(dirs) = std::env::var("ASTERAI_ALLOWED_DIRS") {
+        if let Some(first) = dirs.split(':').next() {
+            if !first.is_empty() {
+                // TODO: check this is the correct dir:
+                // prioritise by dirs that include known files
+                // rather than returning first one.
+                return Ok(first.to_string());
+            }
+        }
+    }
+    Err(
+        "error: no state directory available — pass --allow-dir to grant filesystem access"
+            .to_string(),
+    )
 }
 
 fn resolve_system_prompt(host_dir: &str) -> String {
