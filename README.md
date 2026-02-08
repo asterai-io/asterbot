@@ -73,6 +73,10 @@ Python, or any language that compiles to WASM, publish it, and asterbot can call
 Components communicate through typed WIT interfaces and are sandboxed via WASI --
 they can't access host resources unless explicitly granted.
 
+All asterbot components are published to the registry and can be browsed at
+[asterai.io/asterbot](https://asterai.io/asterbot)
+(e.g. [asterbot:memory](https://asterai.io/asterbot/memory)).
+
 ## 🚀 Getting Started
 
 ### Install the CLI
