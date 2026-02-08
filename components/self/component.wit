@@ -1,0 +1,14 @@
+package asterbot:agent@1.0.0;
+
+interface agent {
+  /// Converse with the agent.
+  /// The agent manages its own conversation history,
+  /// memory, and state internally via the filesystem.
+  /// Returns the assistant's response.
+  converse: func(input: string) -> string;
+}
+
+world component {
+  import asterai:host/api@1.0.0;
+  export agent;
+}

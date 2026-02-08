@@ -1,0 +1,67 @@
+package asterbot:interface@1.0.0;
+
+/// Shared types used across asterbot components.
+interface types {
+  /// Describes a parameter of a tool function.
+  record tool-param {
+    /// Parameter name.
+    name: string,
+    /// Type name (e.g. "string", "u32", "list<string>").
+    type-name: string,
+  }
+
+  /// Describes a callable tool function.
+  record tool-info {
+    /// Component name (e.g. "asterai:http-client").
+    component-name: string,
+    /// Function name including interface
+    /// (e.g. "http/get").
+    function-name: string,
+    /// Human-readable description from WIT /// docs.
+    description: string,
+    /// The function's parameters.
+    params: list<tool-param>,
+    /// Return type name (e.g. "string", "list<u8>").
+    return-type: string,
+  }
+}
+
+/// The stable entrypoint interface.
+interface agent {
+  /// Converse with the agent.
+  /// The agent manages its own conversation history,
+  /// memory, and state internally via the filesystem.
+  /// Returns the assistant's response.
+  converse: func(input: string) -> string;
+}
+
+/// The core orchestration interface.
+/// Swappable — users can provide their own core.
+interface core {
+  /// Run the agent loop for the given input.
+  /// Reads/writes conversation history and state
+  /// from the filesystem. Returns the assistant's
+  /// final response.
+  converse: func(input: string) -> string;
+}
+
+/// Tool manager interface.
+/// Handles discovery, reflection, and dispatch of
+/// tool components in the environment.
+interface toolkit {
+  use types.{tool-info};
+
+  /// List all available tools with descriptions.
+  list-tools: func() -> list<tool-info>;
+
+  /// Call a tool function. Returns the result as a string.
+  call-tool: func(
+    component-name: string,
+    function-name: string,
+    args-json: string,
+  ) -> string;
+
+  /// Format all available tools as a text block
+  /// suitable for inclusion in an LLM system prompt.
+  format-tools-for-prompt: func() -> string;
+}

@@ -1,0 +1,49 @@
+package asterbot:toolkit@1.0.0;
+
+interface types {
+  /// Describes a parameter of a tool function.
+  record tool-param {
+    /// Parameter name.
+    name: string,
+    /// Type name (e.g. "string", "u32", "list<string>").
+    type-name: string,
+  }
+
+  /// Describes a callable tool function.
+  record tool-info {
+    /// Component name (e.g. "asterai:http-client").
+    component-name: string,
+    /// Function name including interface
+    /// (e.g. "http/get").
+    function-name: string,
+    /// Human-readable description from WIT /// docs.
+    description: string,
+    /// The function's parameters.
+    params: list<tool-param>,
+    /// Return type name (e.g. "string", "list<u8>").
+    return-type: string,
+  }
+}
+
+interface toolkit {
+  use types.{tool-info};
+
+  /// List all available tools with descriptions.
+  list-tools: func() -> list<tool-info>;
+
+  /// Call a tool function. Returns the result as a string.
+  call-tool: func(
+    component-name: string,
+    function-name: string,
+    args-json: string,
+  ) -> string;
+
+  /// Format all available tools as a text block
+  /// suitable for inclusion in an LLM system prompt.
+  format-tools-for-prompt: func() -> string;
+}
+
+world component {
+  import asterai:host/api@1.0.0;
+  export toolkit;
+}
