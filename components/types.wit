@@ -66,6 +66,54 @@ interface toolkit {
   format-tools-for-prompt: func() -> string;
 }
 
+/// The agent's soul — its personality, values, and
+/// evolving self-knowledge. Read and written by the agent.
+interface soul {
+  /// Read the soul content. Returns empty string if
+  /// no soul file exists yet.
+  get: func() -> string;
+
+  /// Write the soul content, replacing the existing soul.
+  set: func(content: string);
+}
+
+/// Persistent memory store. Each memory is a named
+/// markdown document the agent can create, read, update,
+/// and delete.
+interface memory {
+  /// List all memory names (without .md extension).
+  list-all: func() -> list<string>;
+
+  /// Read a memory by name. Returns empty string if
+  /// it doesn't exist.
+  get: func(name: string) -> string;
+
+  /// Write a memory. Creates or overwrites.
+  set: func(name: string, content: string);
+
+  /// Delete a memory. No-op if it doesn't exist.
+  remove: func(name: string);
+}
+
+/// Skill documents the agent can consult. Similar to
+/// memory but for reference knowledge and learned
+/// procedures. Users can ask the agent to learn new
+/// skills on-demand.
+interface skills {
+  /// List all skill names (without .md extension).
+  list-all: func() -> list<string>;
+
+  /// Read a skill by name. Returns empty string if
+  /// it doesn't exist.
+  get: func(name: string) -> string;
+
+  /// Write a skill. Creates or overwrites.
+  set: func(name: string, content: string);
+
+  /// Delete a skill. No-op if it doesn't exist.
+  remove: func(name: string);
+}
+
 world asterbot {
   export types;
 }
