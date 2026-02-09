@@ -212,6 +212,10 @@ All asterbot components are published to the registry and can be browsed at
 
 [1]: https://thehackernews.com/2026/02/researchers-find-341-malicious-clawhub.html
 
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=asterai-io/asterbot&type=Date)](https://star-history.com/#asterai-io/asterbot&Date)
+
 ## 📄 License
 
 [APACHE 2.0](LICENSE)
