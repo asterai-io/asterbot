@@ -102,12 +102,12 @@ asterai env add-component asterbot asterbot:core
 asterai env add-component asterbot asterbot:toolkit
 asterai env add-component asterbot asterai:llm
 
-# Capabilities
+# Core tools
 asterai env add-component asterbot asterbot:soul
 asterai env add-component asterbot asterbot:memory
 asterai env add-component asterbot asterbot:skills
 
-# Tools (example -- you can add any component as a tool)
+# Other tools (example -- you can add any component as a tool)
 asterai env add-component asterbot asterai:firecrawl
 ```
 
