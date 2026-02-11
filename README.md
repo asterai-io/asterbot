@@ -114,16 +114,16 @@ asterai env add-component asterbot asterai:firecrawl
 Configure:
 
 ```bash
-# LLM provider (pick any — OpenAI, Anthropic, Mistral, etc.)
-asterai env set-var asterbot ASTERBOT_MODEL="anthropic/claude-sonnet-4-5"
-asterai env set-var asterbot ANTHROPIC_KEY="sk-..."
+# LLM provider (pick any: OpenAI, Anthropic, Mistral, etc.)
+asterai env set-var asterbot --var ASTERBOT_MODEL="anthropic/claude-sonnet-4-5"
+asterai env set-var asterbot --var ANTHROPIC_KEY="sk-..."
 
 # Enable tools the agent can use
 # This will also enable the Firecrawl component as a tool.
-asterai env set-var asterbot ASTERBOT_TOOLS="asterbot:soul,asterbot:memory,asterbot:skills,asterai:firecrawl"
+asterai env set-var asterbot --var ASTERBOT_TOOLS="asterbot:soul,asterbot:memory,asterbot:skills,asterai:firecrawl"
 
 # Firecrawl API key (for web search/scrape)
-asterai env set-var asterbot FIRECRAWL_KEY="fc-..."
+asterai env set-var asterbot --var FIRECRAWL_KEY="fc-..."
 ```
 
 Run:
