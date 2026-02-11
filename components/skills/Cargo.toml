@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-wit-bindgen-rt = { version = "0.44.0", features = ["bitflags"] }
+wit-bindgen = "0.52.0"
 
 [lib]
 crate-type = ["cdylib"]
@@ -16,8 +16,3 @@ opt-level = "s"
 debug = false
 strip = true
 lto = true
-
-[package.metadata.component]
-package = "asterbot:skills"
-
-[package.metadata.component.dependencies]

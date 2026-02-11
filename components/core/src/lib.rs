@@ -3,7 +3,13 @@ use crate::bindings::exports::asterbot::types::core::Guest;
 use serde::{Deserialize, Serialize};
 
 #[allow(warnings)]
-mod bindings;
+mod bindings {
+    wit_bindgen::generate!({
+        path: "wit/package.wasm",
+        world: "component",
+        generate_all,
+    });
+}
 
 struct Component;
 
