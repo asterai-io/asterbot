@@ -1,7 +1,7 @@
-use std::env;
-use crate::bindings::asterai::discord::discord;
+use crate::bindings::asterai::discord::api;
+use crate::bindings::asterai::discord::types::{Message, User};
 use crate::bindings::asterbot::types::agent;
-use crate::bindings::exports::asterai::discord_message_listener::incoming_handler::{Guest, Message};
+use crate::bindings::exports::asterai::discord::incoming_handler::Guest;
 
 #[allow(warnings)]
 mod bindings {
@@ -16,21 +16,24 @@ struct Component;
 
 impl Guest for Component {
     fn on_message(message: Message) {
-        if !check_should_proceed(&message){
+        let self_user = api::get_self();
+        if !check_should_proceed(&message, &self_user) {
             return;
         }
-        println!("got message {message:#?}");
+        println!("processing message {message:#?}");
         let response = agent::converse(&message.content);
-        discord::send_message(&response, &message.channel_id);
+        api::send_message(&response, &message.channel_id);
     }
 }
 
-fn check_should_proceed(message: &Message) -> bool {
-    let reply_if_message_contains_opt = env::var("DISCORD_GATEWAY_REPLY_IF_MESSAGE_CONTAINS").ok();
-    match reply_if_message_contains_opt {
-        None => true,
-        Some(substr) => message.content.to_lowercase().contains(&substr.to_lowercase()),
+fn check_should_proceed(message: &Message, self_user: &User) -> bool {
+    if message.author.id == self_user.id {
+        // Do not proceed if message is from self.
+        return false;
     }
+    let mention = format!("<@{}>", self_user.id);
+    let has_mention = message.content.contains(&mention);
+    has_mention
 }
 
 bindings::export!(Component with_types_in bindings);

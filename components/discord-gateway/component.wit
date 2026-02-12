@@ -1,7 +1,12 @@
 package asterbot:discord-gateway@0.1.0;
 
+/// Discord Gateway component.
+///
+/// This component listens for messages in Discord,
+/// replying to all mentions by default.
 world component {
   import asterbot:types/agent@1.0.0;
-  import asterai:discord/discord@0.1.0;
-  export asterai:discord-message-listener/incoming-handler@0.1.0;
+  import asterai:discord/api@0.1.0;
+
+  export asterai:discord/incoming-handler@0.1.0;
 }
