@@ -21,8 +21,8 @@ struct Message {
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
 const DEFAULT_MAX_TOOL_ROUNDS: usize = 10;
-const DEFAULT_MAX_MESSAGES: usize = 100;
-const DEFAULT_MAX_PROMPT_CHARS: usize = 24000;
+// ~120k tokens at ~4 chars/token, leaving room for model response.
+const DEFAULT_MAX_PROMPT_CHARS: usize = 500_000;
 const TOOL_RESULT_TRUNCATE_CHARS: usize = 2000;
 
 impl Guest for Component {
@@ -35,10 +35,6 @@ impl Guest for Component {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_MAX_TOOL_ROUNDS);
-        let max_messages = std::env::var("ASTERBOT_MAX_MESSAGES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(DEFAULT_MAX_MESSAGES);
         let host_dir = match resolve_host_dir() {
             Ok(d) => d,
             Err(e) => return e,
@@ -48,12 +44,10 @@ impl Guest for Component {
             role: "user".to_string(),
             content: input,
         });
-        trim_history(&mut history, max_messages);
-        let tool_descriptions = get_tool_descriptions();
-        let system_prompt = resolve_system_prompt(&host_dir);
+        let context = build_context(&host_dir);
         let mut rounds_remaining = max_tool_rounds;
         loop {
-            let prompt = build_prompt(&system_prompt, &tool_descriptions, &history);
+            let prompt = build_prompt(&context, &history);
             let response = match call_llm(&prompt, &model) {
                 Ok(r) => r,
                 Err(e) => {
@@ -100,14 +94,15 @@ impl Guest for Component {
     }
 }
 
-fn build_prompt(system_prompt: &str, tool_descriptions: &str, history: &[Message]) -> String {
-    let max_chars = std::env::var("ASTERBOT_MAX_PROMPT_CHARS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_MAX_PROMPT_CHARS);
-    let mut preamble = system_prompt.to_string();
+fn build_context(host_dir: &str) -> String {
+    let system_prompt = resolve_system_prompt(host_dir);
+    let tool_descriptions = get_tool_descriptions();
+    let soul = fetch_soul();
+    let skills = fetch_skills();
+    let memory_mention = format_memory_mention();
+    let mut context = system_prompt;
     if !tool_descriptions.is_empty() && tool_descriptions != "No tools available." {
-        preamble.push_str(
+        context.push_str(
             "\n\n\
             You have access to tools. To call a tool, respond with\n\
             exactly one XML block:\n\
@@ -122,10 +117,31 @@ fn build_prompt(system_prompt: &str, tool_descriptions: &str, history: &[Message
             then respond to the user or call another tool.\n\
             \n",
         );
-        preamble.push_str(tool_descriptions);
+        context.push_str(&tool_descriptions);
     }
-    preamble.push_str("\n\nConversation:\n");
-    let remaining = max_chars.saturating_sub(preamble.len());
+    if !soul.is_empty() {
+        context.push_str("\n\nYour soul (personality & self-knowledge):\n");
+        context.push_str(&soul);
+    }
+    if !skills.is_empty() {
+        context.push_str("\n\nYour skills:\n");
+        context.push_str(&skills);
+    }
+    if !memory_mention.is_empty() {
+        context.push_str("\n\n");
+        context.push_str(&memory_mention);
+    }
+    context
+}
+
+fn build_prompt(context: &str, history: &[Message]) -> String {
+    let max_chars = std::env::var("ASTERBOT_MAX_PROMPT_CHARS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_MAX_PROMPT_CHARS);
+    let mut prompt = context.to_string();
+    prompt.push_str("\n\nConversation:\n");
+    let remaining = max_chars.saturating_sub(prompt.len());
     let mut lines: Vec<String> = Vec::new();
     let mut used = 0;
     for msg in history.iter().rev() {
@@ -146,11 +162,60 @@ fn build_prompt(system_prompt: &str, tool_descriptions: &str, history: &[Message
         lines.push(line);
     }
     lines.reverse();
-    let mut prompt = preamble;
     for line in &lines {
         prompt.push_str(line);
     }
     prompt
+}
+
+fn fetch_soul() -> String {
+    match api::call_component_function("asterbot:soul", "soul/get", "[]") {
+        Ok(result) => {
+            let content = decode_json_string(&result);
+            if content.trim().is_empty() {
+                String::new()
+            } else {
+                content
+            }
+        }
+        Err(_) => String::new(),
+    }
+}
+
+fn fetch_skills() -> String {
+    let names: Vec<String> =
+        match api::call_component_function("asterbot:skills", "skills/list-all", "[]") {
+            Ok(result) => serde_json::from_str(&result).unwrap_or_default(),
+            Err(_) => return String::new(),
+        };
+    if names.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for name in &names {
+        let arg = serde_json::to_string(name).unwrap_or_default();
+        let args = format!("[{arg}]");
+        if let Ok(result) = api::call_component_function("asterbot:skills", "skills/get", &args) {
+            let content = decode_json_string(&result);
+            if !content.trim().is_empty() {
+                out.push_str(&format!("\n### {name}\n{content}\n"));
+            }
+        }
+    }
+    out
+}
+
+fn format_memory_mention() -> String {
+    let names: Vec<String> =
+        match api::call_component_function("asterbot:memory", "memory/list-all", "[]") {
+            Ok(result) => serde_json::from_str(&result).unwrap_or_default(),
+            Err(_) => return String::new(),
+        };
+    if names.is_empty() {
+        return "You have persistent memory available. Use the memory tools to store and retrieve information across conversations.".to_string();
+    }
+    let list = names.join(", ");
+    format!("You have persistent memory files: {list}. Use memory/get to retrieve them or memory/set to update them.")
 }
 
 fn resolve_host_dir() -> Result<String, String> {
@@ -293,13 +358,6 @@ fn save_history(host_dir: &str, history: &[Message]) {
             }
         }
         Err(e) => eprintln!("error: failed to serialize history: {e}"),
-    }
-}
-
-fn trim_history(history: &mut Vec<Message>, max: usize) {
-    if history.len() > max {
-        let drop = history.len() - max;
-        history.drain(..drop);
     }
 }
 
