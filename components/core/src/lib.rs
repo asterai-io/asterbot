@@ -62,7 +62,7 @@ impl Guest for Component {
                     return msg;
                 }
             };
-            let Some(tc) = parse_tool_call(&response) else {
+            let Some(parsed) = parse_tool_call(&response) else {
                 history.push(Message {
                     role: "assistant".to_string(),
                     content: response.clone(),
@@ -70,6 +70,13 @@ impl Guest for Component {
                 save_history(&host_dir, &history);
                 return response;
             };
+            if let Some(text) = &parsed.surrounding_text {
+                history.push(Message {
+                    role: "assistant".to_string(),
+                    content: text.clone(),
+                });
+            }
+            let tc = &parsed.tool_call;
             history.push(Message {
                 role: "tool_call".to_string(),
                 content: format!("{} / {} {}", tc.component, tc.function, tc.args),
@@ -210,19 +217,50 @@ fn call_tool(component: &str, function: &str, args: &str) -> String {
     }
 }
 
+struct ParsedToolCall {
+    tool_call: ToolCall,
+    surrounding_text: Option<String>,
+}
+
 struct ToolCall {
     component: String,
     function: String,
     args: String,
 }
 
-fn parse_tool_call(response: &str) -> Option<ToolCall> {
-    let block = extract_tag(response, "tool_call")?;
-    Some(ToolCall {
-        component: extract_tag(&block, "component")?,
-        function: extract_tag(&block, "function")?,
-        args: extract_tag(&block, "args").unwrap_or_else(|| "{}".to_string()),
+fn parse_tool_call(response: &str) -> Option<ParsedToolCall> {
+    let (block, surrounding) = extract_tool_call_block(response)?;
+    let surrounding_text = if surrounding.is_empty() {
+        None
+    } else {
+        Some(surrounding)
+    };
+    Some(ParsedToolCall {
+        tool_call: ToolCall {
+            component: extract_tag(&block, "component")?,
+            function: extract_tag(&block, "function")?,
+            args: extract_tag(&block, "args").unwrap_or_else(|| "{}".to_string()),
+        },
+        surrounding_text,
     })
+}
+
+fn extract_tool_call_block(text: &str) -> Option<(String, String)> {
+    let open = "<tool_call>";
+    let close = "</tool_call>";
+    let open_start = text.find(open)?;
+    let content_start = open_start + open.len();
+    let close_start = text[content_start..].find(close)? + content_start;
+    let block = text[content_start..close_start].trim().to_string();
+    let before = text[..open_start].trim();
+    let after = text[close_start + close.len()..].trim();
+    let surrounding = match (before.is_empty(), after.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => before.to_string(),
+        (true, false) => after.to_string(),
+        (false, false) => format!("{before}\n{after}"),
+    };
+    Some((block, surrounding))
 }
 
 fn extract_tag(text: &str, tag: &str) -> Option<String> {
