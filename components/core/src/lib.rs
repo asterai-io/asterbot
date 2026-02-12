@@ -176,7 +176,7 @@ fn resolve_host_dir() -> Result<String, String> {
 }
 
 fn resolve_system_prompt(host_dir: &str) -> String {
-    let path = format!("{host_dir}/system-prompt.txt");
+    let path = format!("{host_dir}/SYSTEM_PROMPT.md");
     if let Ok(contents) = std::fs::read_to_string(&path) {
         if !contents.trim().is_empty() {
             return contents;
