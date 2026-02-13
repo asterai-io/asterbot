@@ -72,8 +72,11 @@ impl Guest for Component {
             }
             let tc = &parsed.tool_call;
             history.push(Message {
-                role: "tool_call".to_string(),
-                content: format!("{} / {} {}", tc.component, tc.function, tc.args),
+                role: "assistant".to_string(),
+                content: format!(
+                    "<tool_call>\n<component>{}</component>\n<function>{}</function>\n<args>{}</args>\n</tool_call>",
+                    tc.component, tc.function, tc.args
+                ),
             });
             let tool_result = call_tool(&tc.component, &tc.function, &tc.args);
             history.push(Message {
