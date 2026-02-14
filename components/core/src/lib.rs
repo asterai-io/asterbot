@@ -46,6 +46,7 @@ impl Guest for Component {
         });
         let context = build_context(&host_dir);
         let mut rounds_remaining = max_tool_rounds;
+        let mut accumulated_text: Vec<String> = Vec::new();
         loop {
             let prompt = build_prompt(&context, &history);
             let response = match call_llm(&prompt, &model) {
@@ -56,36 +57,46 @@ impl Guest for Component {
                     return msg;
                 }
             };
-            let Some(parsed) = parse_tool_call(&response) else {
+            let Some(parsed) = parse_tool_calls(&response) else {
+                let mut final_response = response.clone();
+                if !accumulated_text.is_empty() {
+                    final_response =
+                        format!("{}\n\n{}", accumulated_text.join("\n\n"), final_response);
+                }
                 history.push(Message {
                     role: "assistant".to_string(),
-                    content: response.clone(),
+                    content: final_response.clone(),
                 });
                 save_history(&host_dir, &history);
-                return response;
+                return final_response;
             };
             if let Some(text) = &parsed.surrounding_text {
+                accumulated_text.push(text.clone());
                 history.push(Message {
                     role: "assistant".to_string(),
                     content: text.clone(),
                 });
             }
-            let tc = &parsed.tool_call;
-            history.push(Message {
-                role: "assistant".to_string(),
-                content: format!(
-                    "<tool_call>\n<component>{}</component>\n<function>{}</function>\n<args>{}</args>\n</tool_call>",
-                    tc.component, tc.function, tc.args
-                ),
-            });
-            let tool_result = call_tool(&tc.component, &tc.function, &tc.args);
-            history.push(Message {
-                role: "tool_result".to_string(),
-                content: tool_result.clone(),
-            });
+            for tc in &parsed.tool_calls {
+                history.push(Message {
+                    role: "assistant".to_string(),
+                    content: format!(
+                        "<tool_call>\n<component>{}</component>\n<function>{}</function>\n<args>{}</args>\n</tool_call>",
+                        tc.component, tc.function, tc.args
+                    ),
+                });
+                let tool_result = call_tool(&tc.component, &tc.function, &tc.args);
+                history.push(Message {
+                    role: "tool_result".to_string(),
+                    content: tool_result.clone(),
+                });
+            }
             rounds_remaining -= 1;
             if rounds_remaining == 0 {
-                let msg = format!("{}\n\n(max tool rounds reached)", tool_result,);
+                let mut msg = "max tool rounds reached".to_string();
+                if !accumulated_text.is_empty() {
+                    msg = format!("{}\n\n{}", accumulated_text.join("\n\n"), msg);
+                }
                 history.push(Message {
                     role: "assistant".to_string(),
                     content: msg.clone(),
@@ -107,8 +118,7 @@ fn build_context(host_dir: &str) -> String {
     if !tool_descriptions.is_empty() && tool_descriptions != "No tools available." {
         context.push_str(
             "\n\n\
-            You have access to tools. To call a tool, respond with\n\
-            exactly one XML block:\n\
+            You have access to tools. To call a tool, use XML blocks:\n\
             \n\
             <tool_call>\n\
             <component>component-name</component>\n\
@@ -116,8 +126,9 @@ fn build_context(host_dir: &str) -> String {
             <args>{\"key\": \"value\"}</args>\n\
             </tool_call>\n\
             \n\
-            After a tool call, you will receive the result and can\n\
-            then respond to the user or call another tool.\n\
+            You can make multiple tool calls in a single response.\n\
+            After tool calls, you will receive the results and can\n\
+            then respond to the user or call more tools.\n\
             \n",
         );
         context.push_str(&tool_descriptions);
@@ -285,8 +296,8 @@ fn call_tool(component: &str, function: &str, args: &str) -> String {
     }
 }
 
-struct ParsedToolCall {
-    tool_call: ToolCall,
+struct ParsedResponse {
+    tool_calls: Vec<ToolCall>,
     surrounding_text: Option<String>,
 }
 
@@ -296,39 +307,57 @@ struct ToolCall {
     args: String,
 }
 
-fn parse_tool_call(response: &str) -> Option<ParsedToolCall> {
-    let (block, surrounding) = extract_tool_call_block(response)?;
-    let surrounding_text = if surrounding.is_empty() {
+fn parse_tool_calls(response: &str) -> Option<ParsedResponse> {
+    let mut tool_calls = Vec::new();
+    let mut text_parts: Vec<String> = Vec::new();
+    let mut remaining = response;
+    loop {
+        let Some(open_start) = remaining.find("<tool_call>") else {
+            let trimmed = remaining.trim();
+            if !trimmed.is_empty() {
+                text_parts.push(trimmed.to_string());
+            }
+            break;
+        };
+        let before = remaining[..open_start].trim();
+        if !before.is_empty() {
+            text_parts.push(before.to_string());
+        }
+        let content_start = open_start + "<tool_call>".len();
+        let Some(close_offset) = remaining[content_start..].find("</tool_call>") else {
+            let trimmed = remaining.trim();
+            if !trimmed.is_empty() {
+                text_parts.push(trimmed.to_string());
+            }
+            break;
+        };
+        let close_start = content_start + close_offset;
+        let block = remaining[content_start..close_start].trim();
+        if let Some(tc) = parse_single_tool_call(block) {
+            tool_calls.push(tc);
+        }
+        remaining = &remaining[close_start + "</tool_call>".len()..];
+    }
+    if tool_calls.is_empty() {
+        return None;
+    }
+    let surrounding_text = if text_parts.is_empty() {
         None
     } else {
-        Some(surrounding)
+        Some(text_parts.join("\n"))
     };
-    Some(ParsedToolCall {
-        tool_call: ToolCall {
-            component: extract_tag(&block, "component")?,
-            function: extract_tag(&block, "function")?,
-            args: extract_tag(&block, "args").unwrap_or_else(|| "{}".to_string()),
-        },
+    Some(ParsedResponse {
+        tool_calls,
         surrounding_text,
     })
 }
 
-fn extract_tool_call_block(text: &str) -> Option<(String, String)> {
-    let open = "<tool_call>";
-    let close = "</tool_call>";
-    let open_start = text.find(open)?;
-    let content_start = open_start + open.len();
-    let close_start = text[content_start..].find(close)? + content_start;
-    let block = text[content_start..close_start].trim().to_string();
-    let before = text[..open_start].trim();
-    let after = text[close_start + close.len()..].trim();
-    let surrounding = match (before.is_empty(), after.is_empty()) {
-        (true, true) => String::new(),
-        (false, true) => before.to_string(),
-        (true, false) => after.to_string(),
-        (false, false) => format!("{before}\n{after}"),
-    };
-    Some((block, surrounding))
+fn parse_single_tool_call(block: &str) -> Option<ToolCall> {
+    Some(ToolCall {
+        component: extract_tag(block, "component")?,
+        function: extract_tag(block, "function")?,
+        args: extract_tag(block, "args").unwrap_or_else(|| "{}".to_string()),
+    })
 }
 
 fn extract_tag(text: &str, tag: &str) -> Option<String> {
