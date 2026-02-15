@@ -136,6 +136,33 @@ asterai env call asterbot --allow-dir ~/.asterbot \
 The `--allow-dir` flag grants the agent filesystem access for
 persistent memory, skills, and conversation history.
 
+#### Connect to Telegram
+
+Add the Telegram component and gateway:
+
+```bash
+asterai env add-component asterbot asterai:telegram
+asterai env add-component asterbot asterbot:telegram-gateway
+
+asterai env set-var asterbot --var TELEGRAM_TOKEN="<your-bot-token>"
+asterai env set-var asterbot --var TELEGRAM_WEBHOOK_URL="http://localhost:8080/<your-username>/asterbot/asterai/telegram/webhook"
+asterai env set-var asterbot --var TELEGRAM_INCOMING_HANDLER_COMPONENTS="asterbot:telegram-gateway"
+asterai env set-var asterbot --var TELEGRAM_ALLOWED_USER_IDS="<your-telegram-id>"
+```
+
+The webhook URL must be publicly accessible over HTTPS.
+If running locally, you can use a tunnel like
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+or [ngrok](https://ngrok.com) to expose your local server.
+
+Then run with `asterai env run asterbot --allow-dir ~/.asterbot`.
+Your agent is now live on Telegram — message your bot and it
+responds via `asterbot:agent`.
+
+To find your Telegram user ID, message
+[@userinfobot](https://t.me/userinfobot).
+
+
 ### Example
 
 ```
