@@ -43,9 +43,7 @@ impl Guest for Component {
 
 fn validate_access(message: &Message) -> bool {
     match &*ACCESS_MODE {
-        AccessMode::AllowList(ids) => {
-            ids.contains(&message.sender.id)
-        }
+        AccessMode::AllowList(ids) => ids.contains(&message.sender.id),
         AccessMode::Public => true,
         AccessMode::Disabled => {
             eprintln!(
