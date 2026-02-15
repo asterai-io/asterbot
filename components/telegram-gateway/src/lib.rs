@@ -19,7 +19,45 @@ enum AccessMode {
     Disabled,
 }
 
-static ACCESS_MODE: LazyLock<AccessMode> = LazyLock::new(|| {
+static ACCESS_MODE: LazyLock<AccessMode> = LazyLock::new(|| init_access_mode());
+
+struct Component;
+
+impl Guest for Component {
+    fn on_message(message: Message) {
+        println!(
+            "telegram-gateway: message from {} (id={}): {}",
+            message.sender.username, message.sender.id, message.content
+        );
+        let self_user = api::get_self();
+        if message.sender.id == self_user.id {
+            return;
+        }
+        if !validate_access(&message) {
+            return;
+        }
+        let response = agent::converse(&message.content);
+        api::send_message(&response, message.chat_id);
+    }
+}
+
+fn validate_access(message: &Message) -> bool {
+    match &*ACCESS_MODE {
+        AccessMode::AllowList(ids) => {
+            ids.contains(&message.sender.id)
+        }
+        AccessMode::Public => true,
+        AccessMode::Disabled => {
+            eprintln!(
+                "telegram-gateway: disabled, set \
+                     TELEGRAM_ALLOWED_USER_IDS or TELEGRAM_PUBLIC=true"
+            );
+            false
+        }
+    }
+}
+
+fn init_access_mode() -> AccessMode {
     let allowed_ids: Vec<i64> = std::env::var("TELEGRAM_ALLOWED_USER_IDS")
         .unwrap_or_default()
         .split(',')
@@ -42,35 +80,6 @@ static ACCESS_MODE: LazyLock<AccessMode> = LazyLock::new(|| {
         return AccessMode::Public;
     }
     AccessMode::Disabled
-});
-
-struct Component;
-
-impl Guest for Component {
-    fn on_message(message: Message) {
-        let self_user = api::get_self();
-        if message.sender.id == self_user.id {
-            return;
-        }
-        match &*ACCESS_MODE {
-            AccessMode::AllowList(ids) => {
-                if !ids.contains(&message.sender.id) {
-                    return;
-                }
-            }
-            AccessMode::Public => {}
-            AccessMode::Disabled => {
-                eprintln!(
-                    "message ignored: set TELEGRAM_ALLOWED_USER_IDS \
-                     or TELEGRAM_PUBLIC=true to enable"
-                );
-                return;
-            }
-        }
-        println!("processing message {message:#?}");
-        let response = agent::converse(&message.content);
-        api::send_message(&response, message.chat_id);
-    }
 }
 
 bindings::export!(Component with_types_in bindings);
