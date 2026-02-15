@@ -2,8 +2,20 @@ package asterbot:telegram-gateway@0.1.0;
 
 /// Telegram Gateway component.
 ///
-/// This component listens for messages in Telegram,
-/// replying to all messages by default.
+/// This component listens for messages in Telegram.
+/// Disabled by default — configure access to enable.
+///
+/// Environment variables:
+/// - TELEGRAM_ALLOWED_USER_IDS (optional):
+///   Comma-separated list of Telegram user IDs
+///   allowed to interact with the bot.
+/// - TELEGRAM_PUBLIC (optional):
+///   Set to "true" to allow all users.
+///   Defaults to "false".
+///
+/// If neither is set, all messages are ignored.
+/// If both are set, TELEGRAM_ALLOWED_USER_IDS
+/// takes priority.
 world component {
   import asterbot:types/agent@1.0.0;
   import asterai:telegram/api@0.1.0;
