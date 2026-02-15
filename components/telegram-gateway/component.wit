@@ -1,0 +1,12 @@
+package asterbot:telegram-gateway@0.1.0;
+
+/// Telegram Gateway component.
+///
+/// This component listens for messages in Telegram,
+/// replying to all messages by default.
+world component {
+  import asterbot:types/agent@1.0.0;
+  import asterai:telegram/api@0.1.0;
+
+  export asterai:telegram/incoming-handler@0.1.0;
+}
