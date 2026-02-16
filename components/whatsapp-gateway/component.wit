@@ -1,0 +1,24 @@
+package asterbot:whatsapp-gateway@0.1.0;
+
+/// WhatsApp Gateway component.
+///
+/// This component listens for messages in WhatsApp.
+/// Disabled by default — configure access to enable.
+///
+/// Environment variables:
+/// - WHATSAPP_ALLOWED_PHONES (optional):
+///   Comma-separated list of phone numbers
+///   allowed to interact with the bot.
+/// - WHATSAPP_PUBLIC (optional):
+///   Set to "true" to allow all users.
+///   Defaults to "false".
+///
+/// If neither is set, all messages are ignored.
+/// If both are set, WHATSAPP_ALLOWED_PHONES
+/// takes priority.
+world component {
+  import asterbot:types/agent@1.0.0;
+  import asterai:whatsapp/api@0.1.0;
+
+  export asterai:whatsapp/incoming-handler@0.1.0;
+}
