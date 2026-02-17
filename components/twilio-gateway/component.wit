@@ -1,0 +1,24 @@
+package asterbot:twilio-gateway@0.1.0;
+
+/// Twilio SMS Gateway component.
+///
+/// This component listens for SMS messages via Twilio.
+/// Disabled by default — configure access to enable.
+///
+/// Environment variables:
+/// - TWILIO_ALLOWED_PHONES (optional):
+///   Comma-separated list of phone numbers
+///   allowed to interact with the bot.
+/// - TWILIO_PUBLIC (optional):
+///   Set to "true" to allow all users.
+///   Defaults to "false".
+///
+/// If neither is set, all messages are ignored.
+/// If both are set, TWILIO_ALLOWED_PHONES
+/// takes priority.
+world component {
+  import asterbot:types/agent@1.0.0;
+  import asterai:twilio/api@0.1.0;
+
+  export asterai:twilio/incoming-handler@0.1.0;
+}
