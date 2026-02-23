@@ -103,11 +103,16 @@ asterai env add-component asterbot asterbot:toolkit
 asterai env add-component asterbot asterai:llm
 
 # Core tools
+# The soul lets the agent retain a personality and behaviour.
 asterai env add-component asterbot asterbot:soul
+# Allows automatic memory retrieval into the context window.
 asterai env add-component asterbot asterbot:memory
+# Allows automatic skill retrieval into the context window.
 asterai env add-component asterbot asterbot:skills
+# Allows the agent to read and write files under its directory.
+asterai env add-component asterbot asterai:cli
 
-# Other tools (example -- you can add any component as a tool)
+# Other tools (example; you can add any component as a tool)
 asterai env add-component asterbot asterai:firecrawl
 ```
 
@@ -120,7 +125,7 @@ asterai env set-var asterbot --var ANTHROPIC_KEY="sk-..."
 
 # Enable tools the agent can use
 # This will also enable the Firecrawl component as a tool.
-asterai env set-var asterbot --var ASTERBOT_TOOLS="asterbot:soul,asterbot:memory,asterbot:skills,asterai:firecrawl"
+asterai env set-var asterbot --var ASTERBOT_TOOLS="asterai:cli,asterbot:soul,asterbot:memory,asterbot:skills,asterai:firecrawl"
 
 # Firecrawl API key (for web search/scrape)
 asterai env set-var asterbot --var FIRECRAWL_KEY="fc-..."
