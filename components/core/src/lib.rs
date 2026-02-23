@@ -172,14 +172,21 @@ fn build_context(host_dir: &str, input: &str) -> String {
     context
 }
 
+const PROMPT_SUFFIX: &str = "\n[ASSISTANT]\n";
+
 fn build_prompt(context: &str, history: &[Message]) -> String {
     let max_chars = std::env::var("ASTERBOT_MAX_PROMPT_CHARS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_MAX_PROMPT_CHARS);
     let mut prompt = context.to_string();
-    prompt.push_str("\n\nConversation:\n");
-    let remaining = max_chars.saturating_sub(prompt.len());
+    prompt.push_str(
+        "\n\nIMPORTANT: The conversation history below uses [USER], [ASSISTANT], \
+        and [TOOL_RESULT] tags. Generate ONLY the next assistant response. \
+        Do NOT generate [USER] tags or simulate user input.\n\n",
+    );
+    let suffix_len = PROMPT_SUFFIX.len();
+    let remaining = max_chars.saturating_sub(prompt.len() + suffix_len);
     let mut lines: Vec<String> = Vec::new();
     let mut used = 0;
     for msg in history.iter().rev() {
@@ -192,7 +199,9 @@ fn build_prompt(context: &str, history: &[Message]) -> String {
         } else {
             msg.content.clone()
         };
-        let line = format!("{}: {}\n", msg.role, content);
+        // e.g. "user" -> "USER", "tool_result" -> "TOOL_RESULT"
+        let tag = msg.role.to_uppercase();
+        let line = format!("[{tag}]\n{content}\n\n");
         if used + line.len() > remaining && !lines.is_empty() {
             break;
         }
@@ -203,6 +212,7 @@ fn build_prompt(context: &str, history: &[Message]) -> String {
     for line in &lines {
         prompt.push_str(line);
     }
+    prompt.push_str(PROMPT_SUFFIX);
     prompt
 }
 
