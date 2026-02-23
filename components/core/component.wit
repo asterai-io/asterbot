@@ -1,4 +1,4 @@
-package asterbot:core@1.0.5;
+package asterbot:core@1.0.6;
 
 world component {
   import asterai:host/api@1.0.0;
