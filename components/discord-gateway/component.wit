@@ -1,4 +1,4 @@
-package asterbot:discord-gateway@0.1.0;
+package asterbot:discord-gateway@0.1.1;
 
 /// Discord Gateway component.
 ///
