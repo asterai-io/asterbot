@@ -2,6 +2,13 @@ use crate::bindings::asterai::host::api;
 use crate::bindings::exports::asterbot::types::core::Guest;
 use serde::{Deserialize, Serialize};
 
+const MAX_SUGGESTIONS: usize = 3;
+const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
+const DEFAULT_MAX_TOOL_ROUNDS: usize = 10;
+// ~120k tokens at ~4 chars/token, leaving room for model response.
+const DEFAULT_MAX_PROMPT_CHARS: usize = 500_000;
+const TOOL_RESULT_TRUNCATE_CHARS: usize = 2000;
+
 #[allow(warnings)]
 mod bindings {
     wit_bindgen::generate!({
@@ -19,12 +26,6 @@ struct Message {
     content: String,
 }
 
-const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
-const DEFAULT_MAX_TOOL_ROUNDS: usize = 10;
-// ~120k tokens at ~4 chars/token, leaving room for model response.
-const DEFAULT_MAX_PROMPT_CHARS: usize = 500_000;
-const TOOL_RESULT_TRUNCATE_CHARS: usize = 2000;
-
 impl Guest for Component {
     fn converse(input: String) -> String {
         let model = std::env::var("ASTERBOT_MODEL").unwrap_or_default();
@@ -40,11 +41,11 @@ impl Guest for Component {
             Err(e) => return e,
         };
         let mut history = load_history(&host_dir);
+        let context = build_context(&host_dir, &input);
         history.push(Message {
             role: "user".to_string(),
             content: input,
         });
-        let context = build_context(&host_dir);
         let mut rounds_remaining = max_tool_rounds;
         let mut accumulated_text: Vec<String> = Vec::new();
         loop {
@@ -108,12 +109,12 @@ impl Guest for Component {
     }
 }
 
-fn build_context(host_dir: &str) -> String {
+fn build_context(host_dir: &str, input: &str) -> String {
     let system_prompt = resolve_system_prompt(host_dir);
     let tool_descriptions = get_tool_descriptions();
     let soul = fetch_soul();
-    let skills = fetch_skills();
-    let memory_mention = format_memory_mention();
+    let skill_hints = suggest_files("asterbot:skills", "skills/list-all", input);
+    let memory_hints = suggest_files("asterbot:memory", "memory/list-all", input);
     let mut context = system_prompt;
     if !tool_descriptions.is_empty() && tool_descriptions != "No tools available." {
         context.push_str(
@@ -134,16 +135,39 @@ fn build_context(host_dir: &str) -> String {
         context.push_str(&tool_descriptions);
     }
     if !soul.is_empty() {
-        context.push_str("\n\nYour soul (personality & self-knowledge):\n");
+        context.push_str(
+            "\n\nYour soul (personality & self-knowledge) is stored in SOUL.md. \
+            You can update it using the CLI tools.\n",
+        );
         context.push_str(&soul);
     }
-    if !skills.is_empty() {
-        context.push_str("\n\nYour skills:\n");
-        context.push_str(&skills);
+    if !skill_hints.is_empty() {
+        context.push_str(
+            "\n\nThe following skills may be relevant \
+            (stored as .md files in skills/). \
+            You can read, create, edit, or delete them using the CLI tools.\n",
+        );
+        for name in &skill_hints {
+            context.push_str(&format!("- {name}.md\n"));
+        }
+        context.push_str(
+            "These are just the top matches. \
+            You may list all available using the CLI tools.",
+        );
     }
-    if !memory_mention.is_empty() {
-        context.push_str("\n\n");
-        context.push_str(&memory_mention);
+    if !memory_hints.is_empty() {
+        context.push_str(
+            "\n\nThe following memories may be relevant \
+            (stored as .md files in memory/). \
+            You can read, create, edit, or delete them using the CLI tools.\n",
+        );
+        for name in &memory_hints {
+            context.push_str(&format!("- {name}.md\n"));
+        }
+        context.push_str(
+            "These are just the top matches. \
+            You may list all available using the CLI tools.",
+        );
     }
     context
 }
@@ -196,40 +220,36 @@ fn fetch_soul() -> String {
     }
 }
 
-fn fetch_skills() -> String {
-    let names: Vec<String> =
-        match api::call_component_function("asterbot:skills", "skills/list-all", "[]") {
-            Ok(result) => serde_json::from_str(&result).unwrap_or_default(),
-            Err(_) => return String::new(),
-        };
+fn suggest_files(component: &str, list_fn: &str, input: &str) -> Vec<String> {
+    let names: Vec<String> = match api::call_component_function(component, list_fn, "[]") {
+        Ok(result) => serde_json::from_str(&result).unwrap_or_default(),
+        Err(_) => return Vec::new(),
+    };
     if names.is_empty() {
-        return String::new();
+        return Vec::new();
     }
-    let mut out = String::new();
-    for name in &names {
-        let arg = serde_json::to_string(name).unwrap_or_default();
-        let args = format!("[{arg}]");
-        if let Ok(result) = api::call_component_function("asterbot:skills", "skills/get", &args) {
-            let content = decode_json_string(&result);
-            if !content.trim().is_empty() {
-                out.push_str(&format!("\n### {name}\n{content}\n"));
-            }
-        }
-    }
-    out
-}
-
-fn format_memory_mention() -> String {
-    let names: Vec<String> =
-        match api::call_component_function("asterbot:memory", "memory/list-all", "[]") {
-            Ok(result) => serde_json::from_str(&result).unwrap_or_default(),
-            Err(_) => return String::new(),
-        };
-    if names.is_empty() {
-        return "You have persistent memory available. Use the memory tools to store and retrieve information across conversations.".to_string();
-    }
-    let list = names.join(", ");
-    format!("You have persistent memory files: {list}. Use memory/get to retrieve them or memory/set to update them.")
+    let input_words: Vec<String> = input
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|w| w.to_lowercase())
+        .filter(|w| w.len() > 2)
+        .collect();
+    let mut scored: Vec<(usize, &String)> = names
+        .iter()
+        .map(|name| {
+            let name_lower = name.to_lowercase();
+            let score = input_words
+                .iter()
+                .filter(|w| name_lower.contains(w.as_str()))
+                .count();
+            (score, name)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    scored
+        .into_iter()
+        .take(MAX_SUGGESTIONS)
+        .map(|(_, name)| name.clone())
+        .collect()
 }
 
 fn resolve_host_dir() -> Result<String, String> {
