@@ -179,6 +179,9 @@ fn build_prompt(context: &str, history: &[Message]) -> String {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_MAX_PROMPT_CHARS);
+    let max_user_messages_opt: Option<usize> = std::env::var("ASTERBOT_MAX_PROMPT_USER_MESSAGES")
+        .ok()
+        .and_then(|v| v.parse().ok());
     let mut prompt = context.to_string();
     prompt.push_str(
         "\n\nIMPORTANT: The conversation history below uses [USER], [ASSISTANT], \
@@ -189,7 +192,16 @@ fn build_prompt(context: &str, history: &[Message]) -> String {
     let remaining = max_chars.saturating_sub(prompt.len() + suffix_len);
     let mut lines: Vec<String> = Vec::new();
     let mut used = 0;
+    let mut user_msg_count = 0;
     for msg in history.iter().rev() {
+        if msg.role == "user" {
+            if let Some(max) = max_user_messages_opt {
+                if user_msg_count >= max && !lines.is_empty() {
+                    break;
+                }
+            }
+            user_msg_count += 1;
+        }
         let content = if msg.role == "tool_result" && msg.content.len() > TOOL_RESULT_TRUNCATE_CHARS
         {
             format!(
@@ -199,7 +211,6 @@ fn build_prompt(context: &str, history: &[Message]) -> String {
         } else {
             msg.content.clone()
         };
-        // e.g. "user" -> "USER", "tool_result" -> "TOOL_RESULT"
         let tag = msg.role.to_uppercase();
         let line = format!("[{tag}]\n{content}\n\n");
         if used + line.len() > remaining && !lines.is_empty() {
