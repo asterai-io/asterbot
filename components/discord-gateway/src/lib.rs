@@ -3,6 +3,8 @@ use crate::bindings::asterai::discord::types::{Message, User};
 use crate::bindings::asterbot::types::agent;
 use crate::bindings::exports::asterai::discord::incoming_handler::Guest;
 
+const DISCORD_MAX_CHARS: usize = 2000;
+
 #[allow(warnings)]
 mod bindings {
     wit_bindgen::generate!({
@@ -22,6 +24,7 @@ impl Guest for Component {
         }
         println!("processing message {message:#?}");
         let response = agent::converse(&message.content);
+        let response = truncate_to_discord_limit(&response);
         api::send_message(&response, &message.channel_id);
     }
 }
@@ -34,6 +37,20 @@ fn check_should_proceed(message: &Message, self_user: &User) -> bool {
     let mention = format!("<@{}>", self_user.id);
     let has_mention = message.content.contains(&mention);
     has_mention
+}
+
+fn truncate_to_discord_limit(text: &str) -> String {
+    if text.len() <= DISCORD_MAX_CHARS {
+        return text.to_string();
+    }
+    let truncated = &text[..DISCORD_MAX_CHARS - 3];
+    // Avoid splitting a multi-byte char.
+    let end = truncated
+        .char_indices()
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    format!("{}...", &text[..end])
 }
 
 bindings::export!(Component with_types_in bindings);
