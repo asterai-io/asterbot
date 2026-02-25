@@ -119,12 +119,16 @@ fn build_context(host_dir: &str, input: &str) -> String {
     if !tool_descriptions.is_empty() && tool_descriptions != "No tools available." {
         context.push_str(
             "\n\n\
-            You have access to tools. To call a tool, use XML blocks:\n\
+            You have access to tools. To call a tool, use XML blocks.\n\
+            <component> is the component name (e.g. \"asterbot:memory\").\n\
+            <function> is the interface/function (e.g. \"memory/get\").\n\
+            These are SEPARATE fields - do NOT combine them.\n\
             \n\
+            Example:\n\
             <tool_call>\n\
-            <component>component-name</component>\n\
-            <function>interface/function</function>\n\
-            <args>{\"key\": \"value\"}</args>\n\
+            <component>asterbot:memory</component>\n\
+            <function>memory/get</function>\n\
+            <args>{\"name\": \"example\"}</args>\n\
             </tool_call>\n\
             \n\
             You can make multiple tool calls in a single response.\n\

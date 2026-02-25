@@ -83,7 +83,7 @@ impl Guest for Component {
         let mut out = String::from("Available tools:\n");
         for t in &tools {
             out.push_str(&format!(
-                "\n## {} / {}\n",
+                "\n## Tool\nComponent: {}\nFunction: {}\n",
                 t.component_name, t.function_name,
             ));
             out.push_str(&format!("Description: {}\n", t.description));
