@@ -1,13 +1,17 @@
 use crate::bindings::asterai::host::api;
+use crate::bindings::asterai::llm::llm::{
+    chat, ChatMessage, ChatRole, ToolCall, ToolDefinition,
+};
 use crate::bindings::exports::asterbot::types::core::Guest;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 const MAX_SUGGESTIONS: usize = 3;
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
 const DEFAULT_MAX_TOOL_ROUNDS: usize = 10;
+const TOOL_RESULT_TRUNCATE_CHARS: usize = 10_000;
 // ~120k tokens at ~4 chars/token, leaving room for model response.
 const DEFAULT_MAX_PROMPT_CHARS: usize = 500_000;
-const TOOL_RESULT_TRUNCATE_CHARS: usize = 2000;
 
 #[allow(warnings)]
 mod bindings {
@@ -20,10 +24,97 @@ mod bindings {
 
 struct Component;
 
+/// Serializable version of ChatMessage for conversation.json persistence.
 #[derive(Serialize, Deserialize, Clone)]
-struct Message {
+struct PersistedMessage {
     role: String,
     content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<PersistedToolCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct PersistedToolCall {
+    id: String,
+    name: String,
+    arguments_json: String,
+}
+
+impl PersistedMessage {
+    fn to_chat_message(&self) -> ChatMessage {
+        let role = match self.role.as_str() {
+            "system" => ChatRole::System,
+            "user" => ChatRole::User,
+            "assistant" => ChatRole::Assistant,
+            "tool" => ChatRole::Tool,
+            _ => ChatRole::User,
+        };
+        ChatMessage {
+            role,
+            content: self.content.clone(),
+            tool_calls: self
+                .tool_calls
+                .iter()
+                .map(|tc| ToolCall {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments_json: tc.arguments_json.clone(),
+                })
+                .collect(),
+            tool_call_id: self.tool_call_id.clone(),
+        }
+    }
+
+    fn from_chat_message(msg: &ChatMessage) -> Self {
+        let role = match msg.role {
+            ChatRole::System => "system",
+            ChatRole::User => "user",
+            ChatRole::Assistant => "assistant",
+            ChatRole::Tool => "tool",
+        };
+        PersistedMessage {
+            role: role.to_string(),
+            content: msg.content.clone(),
+            tool_calls: msg
+                .tool_calls
+                .iter()
+                .map(|tc| PersistedToolCall {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments_json: tc.arguments_json.clone(),
+                })
+                .collect(),
+            tool_call_id: msg.tool_call_id.clone(),
+        }
+    }
+}
+
+struct ToolEntry {
+    name: String,
+    component: String,
+    function: String,
+    definition: ToolDefinition,
+}
+
+#[derive(Deserialize)]
+struct ToolInfoJson {
+    #[serde(rename = "component-name")]
+    component_name: String,
+    #[serde(rename = "function-name")]
+    function_name: String,
+    description: String,
+    params: Vec<ToolParamJson>,
+    #[serde(rename = "return-type")]
+    _return_type: String,
+}
+
+#[derive(Deserialize)]
+struct ToolParamJson {
+    name: String,
+    #[serde(rename = "type-name")]
+    type_name: String,
 }
 
 impl Guest for Component {
@@ -41,66 +132,71 @@ impl Guest for Component {
             Err(e) => return e,
         };
         let mut history = load_history(&host_dir);
-        let context = build_context(&host_dir, &input);
-        history.push(Message {
-            role: "user".to_string(),
+        let system_message = build_system_message(&host_dir, &input);
+        let tools = get_tool_entries();
+        history.push(ChatMessage {
+            role: ChatRole::User,
             content: input,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
         });
+        let tool_defs: Vec<ToolDefinition> =
+            tools.iter().map(|t| t.definition.clone()).collect();
         let mut rounds_remaining = max_tool_rounds;
-        let mut accumulated_text: Vec<String> = Vec::new();
         loop {
-            let prompt = build_prompt(&context, &history);
-            let response = match call_llm(&prompt, &model) {
-                Ok(r) => r,
-                Err(e) => {
-                    let msg = format!("error: LLM call failed: {e}");
-                    save_history(&host_dir, &history);
-                    return msg;
-                }
-            };
-            let Some(parsed) = parse_tool_calls(&response) else {
-                let mut final_response = response.clone();
-                if !accumulated_text.is_empty() {
-                    final_response =
-                        format!("{}\n\n{}", accumulated_text.join("\n\n"), final_response);
-                }
-                history.push(Message {
-                    role: "assistant".to_string(),
-                    content: final_response.clone(),
+            let mut messages = vec![system_message.clone()];
+            messages.extend(trim_history(&history).iter().cloned());
+            let response = chat(&messages, &tool_defs, &model);
+            if response.content.starts_with("error: ") && response.tool_calls.is_empty() {
+                save_history(&host_dir, &history);
+                return response.content;
+            }
+            if response.tool_calls.is_empty() {
+                history.push(ChatMessage {
+                    role: ChatRole::Assistant,
+                    content: response.content.clone(),
+                    tool_calls: Vec::new(),
+                    tool_call_id: None,
                 });
                 save_history(&host_dir, &history);
-                return final_response;
-            };
-            if let Some(text) = &parsed.surrounding_text {
-                accumulated_text.push(text.clone());
-                history.push(Message {
-                    role: "assistant".to_string(),
-                    content: text.clone(),
-                });
+                return response.content;
             }
-            for tc in &parsed.tool_calls {
-                history.push(Message {
-                    role: "assistant".to_string(),
-                    content: format!(
-                        "<tool_call>\n<component>{}</component>\n<function>{}</function>\n<args>{}</args>\n</tool_call>",
-                        tc.component, tc.function, tc.args
-                    ),
-                });
-                let tool_result = call_tool(&tc.component, &tc.function, &tc.args);
-                history.push(Message {
-                    role: "tool_result".to_string(),
-                    content: tool_result.clone(),
+            history.push(ChatMessage {
+                role: ChatRole::Assistant,
+                content: response.content.clone(),
+                tool_calls: response.tool_calls.clone(),
+                tool_call_id: None,
+            });
+            for tc in &response.tool_calls {
+                let (component, function) = match resolve_tool_name(&tc.name, &tools) {
+                    Some(cf) => cf,
+                    None => {
+                        history.push(ChatMessage {
+                            role: ChatRole::Tool,
+                            content: format!("error: unknown tool '{}'", tc.name),
+                            tool_calls: Vec::new(),
+                            tool_call_id: Some(tc.id.clone()),
+                        });
+                        continue;
+                    }
+                };
+                let result = call_tool(&component, &function, &tc.arguments_json);
+                let truncated = truncate_result(&result);
+                history.push(ChatMessage {
+                    role: ChatRole::Tool,
+                    content: truncated,
+                    tool_calls: Vec::new(),
+                    tool_call_id: Some(tc.id.clone()),
                 });
             }
             rounds_remaining -= 1;
             if rounds_remaining == 0 {
-                let mut msg = "max tool rounds reached".to_string();
-                if !accumulated_text.is_empty() {
-                    msg = format!("{}\n\n{}", accumulated_text.join("\n\n"), msg);
-                }
-                history.push(Message {
-                    role: "assistant".to_string(),
+                let msg = "max tool rounds reached".to_string();
+                history.push(ChatMessage {
+                    role: ChatRole::Assistant,
                     content: msg.clone(),
+                    tool_calls: Vec::new(),
+                    tool_call_id: None,
                 });
                 save_history(&host_dir, &history);
                 return msg;
@@ -109,76 +205,149 @@ impl Guest for Component {
     }
 }
 
-fn build_context(host_dir: &str, input: &str) -> String {
-    let system_prompt = resolve_system_prompt(host_dir);
-    let tool_descriptions = get_tool_descriptions();
+fn build_system_message(host_dir: &str, input: &str) -> ChatMessage {
+    let mut content = resolve_system_prompt(host_dir);
     let soul = fetch_soul();
     let skill_hints = suggest_files("asterbot:skills", "skills/list-all", input);
     let memory_hints = suggest_files("asterbot:memory", "memory/list-all", input);
-    let mut context = system_prompt;
-    if !tool_descriptions.is_empty() && tool_descriptions != "No tools available." {
-        context.push_str(
-            "\n\n\
-            You have access to tools. To call a tool, use XML blocks.\n\
-            <component> is the component name (e.g. \"asterbot:memory\").\n\
-            <function> is the interface/function (e.g. \"memory/get\").\n\
-            These are SEPARATE fields - do NOT combine them.\n\
-            \n\
-            Example:\n\
-            <tool_call>\n\
-            <component>asterbot:memory</component>\n\
-            <function>memory/get</function>\n\
-            <args>{\"name\": \"example\"}</args>\n\
-            </tool_call>\n\
-            \n\
-            You can make multiple tool calls in a single response.\n\
-            After tool calls, you will receive the results and can\n\
-            then respond to the user or call more tools.\n\
-            \n",
-        );
-        context.push_str(&tool_descriptions);
-    }
     if !soul.is_empty() {
-        context.push_str(
-            "\n\nYour soul (personality & self-knowledge) is stored in SOUL.md. \
-            You can update it using the CLI tools.\n",
-        );
-        context.push_str(&soul);
+        content.push_str("\n\nYour soul (personality & self-knowledge):\n");
+        content.push_str(&soul);
     }
     if !skill_hints.is_empty() {
-        context.push_str(
+        content.push_str(
             "\n\nThe following skills may be relevant \
             (stored as .md files in skills/). \
-            You can read, create, edit, or delete them using the CLI tools.\n",
+            You can read, create, edit, or delete them using the tools.\n",
         );
         for name in &skill_hints {
-            context.push_str(&format!("- {name}.md\n"));
+            content.push_str(&format!("- {name}.md\n"));
         }
-        context.push_str(
+        content.push_str(
             "These are just the top matches. \
-            You may list all available using the CLI tools.",
+            You may list all available using the tools.",
         );
     }
     if !memory_hints.is_empty() {
-        context.push_str(
+        content.push_str(
             "\n\nThe following memories may be relevant \
             (stored as .md files in memory/). \
-            You can read, create, edit, or delete them using the CLI tools.\n",
+            You can read, create, edit, or delete them using the tools.\n",
         );
         for name in &memory_hints {
-            context.push_str(&format!("- {name}.md\n"));
+            content.push_str(&format!("- {name}.md\n"));
         }
-        context.push_str(
+        content.push_str(
             "These are just the top matches. \
-            You may list all available using the CLI tools.",
+            You may list all available using the tools.",
         );
     }
-    context
+    ChatMessage {
+        role: ChatRole::System,
+        content,
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+    }
 }
 
-const PROMPT_SUFFIX: &str = "\n[ASSISTANT]\n";
+fn get_tool_entries() -> Vec<ToolEntry> {
+    let tools_json =
+        match api::call_component_function("asterbot:toolkit", "toolkit/list-tools", "[]") {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+    let tool_infos: Vec<ToolInfoJson> = serde_json::from_str(&tools_json).unwrap_or_default();
+    tool_infos
+        .into_iter()
+        .map(|info| {
+            let tool_name = encode_tool_name(&info.component_name, &info.function_name);
+            let params_schema = build_params_schema(&info.params);
+            ToolEntry {
+                name: tool_name.clone(),
+                component: info.component_name,
+                function: info.function_name,
+                definition: ToolDefinition {
+                    name: tool_name,
+                    description: info.description,
+                    parameters_json_schema: params_schema,
+                },
+            }
+        })
+        .collect()
+}
 
-fn build_prompt(context: &str, history: &[Message]) -> String {
+/// Encodes a component name and function name into a tool name
+/// that is safe for LLM tool calling APIs.
+/// e.g. "asterbot:memory" + "memory/get" → "asterbot-memory--memory-get"
+fn encode_tool_name(component: &str, function: &str) -> String {
+    let c = component.replace(':', "-");
+    let f = function.replace('/', "-");
+    format!("{c}--{f}")
+}
+
+fn resolve_tool_name(tool_name: &str, tools: &[ToolEntry]) -> Option<(String, String)> {
+    tools
+        .iter()
+        .find(|t| t.name == tool_name)
+        .map(|t| (t.component.clone(), t.function.clone()))
+}
+
+fn build_params_schema(params: &[ToolParamJson]) -> String {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for p in params {
+        let is_option = p.type_name.starts_with("option<");
+        let json_type = wit_type_to_json_type(&p.type_name);
+        properties.insert(p.name.clone(), json_type);
+        if !is_option {
+            required.push(Value::String(p.name.clone()));
+        }
+    }
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    });
+    serde_json::to_string(&schema).unwrap_or_else(|_| r#"{"type":"object"}"#.to_string())
+}
+
+fn wit_type_to_json_type(wit_type: &str) -> Value {
+    match wit_type {
+        "string" => serde_json::json!({"type": "string"}),
+        "bool" => serde_json::json!({"type": "boolean"}),
+        "u8" | "u16" | "u32" | "u64" | "s8" | "s16" | "s32" | "s64" => {
+            serde_json::json!({"type": "integer"})
+        }
+        "f32" | "f64" | "float32" | "float64" => {
+            serde_json::json!({"type": "number"})
+        }
+        t if t.starts_with("list<") && t.ends_with('>') => {
+            let inner = &t[5..t.len() - 1];
+            serde_json::json!({
+                "type": "array",
+                "items": wit_type_to_json_type(inner)
+            })
+        }
+        t if t.starts_with("option<") && t.ends_with('>') => {
+            let inner = &t[7..t.len() - 1];
+            wit_type_to_json_type(inner)
+        }
+        _ => serde_json::json!({"type": "string"}),
+    }
+}
+
+fn truncate_result(result: &str) -> String {
+    if result.len() <= TOOL_RESULT_TRUNCATE_CHARS {
+        result.to_string()
+    } else {
+        format!(
+            "{}... (truncated)",
+            &result[..TOOL_RESULT_TRUNCATE_CHARS]
+        )
+    }
+}
+
+fn trim_history(history: &[ChatMessage]) -> &[ChatMessage] {
     let max_chars = std::env::var("ASTERBOT_MAX_PROMPT_CHARS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -186,49 +355,28 @@ fn build_prompt(context: &str, history: &[Message]) -> String {
     let max_user_messages_opt: Option<usize> = std::env::var("ASTERBOT_MAX_PROMPT_USER_MESSAGES")
         .ok()
         .and_then(|v| v.parse().ok());
-    let mut prompt = context.to_string();
-    prompt.push_str(
-        "\n\nIMPORTANT: The conversation history below uses [USER], [ASSISTANT], \
-        and [TOOL_RESULT] tags. Generate ONLY the next assistant response. \
-        Do NOT generate [USER] tags or simulate user input.\n\n",
-    );
-    let suffix_len = PROMPT_SUFFIX.len();
-    let remaining = max_chars.saturating_sub(prompt.len() + suffix_len);
-    let mut lines: Vec<String> = Vec::new();
-    let mut used = 0;
-    let mut user_msg_count = 0;
-    for msg in history.iter().rev() {
-        if msg.role == "user" {
-            if let Some(max) = max_user_messages_opt {
-                if user_msg_count >= max && !lines.is_empty() {
+    let mut start = 0;
+    if let Some(max) = max_user_messages_opt {
+        let mut user_count = 0;
+        for (i, msg) in history.iter().enumerate().rev() {
+            if matches!(msg.role, ChatRole::User) {
+                user_count += 1;
+                if user_count > max {
+                    start = i + 1;
                     break;
                 }
             }
-            user_msg_count += 1;
         }
-        let content = if msg.role == "tool_result" && msg.content.len() > TOOL_RESULT_TRUNCATE_CHARS
-        {
-            format!(
-                "{}... (truncated)",
-                &msg.content[..TOOL_RESULT_TRUNCATE_CHARS]
-            )
-        } else {
-            msg.content.clone()
-        };
-        let tag = msg.role.to_uppercase();
-        let line = format!("[{tag}]\n{content}\n\n");
-        if used + line.len() > remaining && !lines.is_empty() {
+    }
+    let mut total_chars = 0;
+    for (i, msg) in history[start..].iter().enumerate().rev() {
+        total_chars += msg.content.len();
+        if total_chars > max_chars && i > 0 {
+            start += i + 1;
             break;
         }
-        used += line.len();
-        lines.push(line);
     }
-    lines.reverse();
-    for line in &lines {
-        prompt.push_str(line);
-    }
-    prompt.push_str(PROMPT_SUFFIX);
-    prompt
+    &history[start..]
 }
 
 fn fetch_soul() -> String {
@@ -286,9 +434,6 @@ fn resolve_host_dir() -> Result<String, String> {
     if let Ok(dirs) = std::env::var("ASTERAI_ALLOWED_DIRS") {
         if let Some(first) = dirs.split(':').next() {
             if !first.is_empty() {
-                // TODO: check this is the correct dir:
-                // prioritise by dirs that include known files
-                // rather than returning first one.
                 return Ok(first.to_string());
             }
         }
@@ -313,23 +458,6 @@ fn decode_json_string(json: &str) -> String {
     serde_json::from_str::<String>(json).unwrap_or_else(|_| json.to_string())
 }
 
-fn get_tool_descriptions() -> String {
-    match api::call_component_function("asterbot:toolkit", "toolkit/format-tools-for-prompt", "[]")
-    {
-        Ok(result) => decode_json_string(&result),
-        Err(_) => String::new(),
-    }
-}
-
-fn call_llm(prompt: &str, model: &str) -> Result<String, String> {
-    let prompt_json = serde_json::to_string(prompt).map_err(|e| e.to_string())?;
-    let model_json = serde_json::to_string(model).map_err(|e| e.to_string())?;
-    let args = format!("[{prompt_json}, {model_json}]");
-    api::call_component_function("asterai:llm", "llm/prompt", &args)
-        .map(|r| decode_json_string(&r))
-        .map_err(|e| format!("{:?}: {}", e.kind, e.message))
-}
-
 fn call_tool(component: &str, function: &str, args: &str) -> String {
     let component_json = serde_json::to_string(component).unwrap_or_default();
     let function_json = serde_json::to_string(function).unwrap_or_default();
@@ -341,94 +469,27 @@ fn call_tool(component: &str, function: &str, args: &str) -> String {
     }
 }
 
-struct ParsedResponse {
-    tool_calls: Vec<ToolCall>,
-    surrounding_text: Option<String>,
-}
-
-struct ToolCall {
-    component: String,
-    function: String,
-    args: String,
-}
-
-fn parse_tool_calls(response: &str) -> Option<ParsedResponse> {
-    let mut tool_calls = Vec::new();
-    let mut text_parts: Vec<String> = Vec::new();
-    let mut remaining = response;
-    loop {
-        let Some(open_start) = remaining.find("<tool_call>") else {
-            let trimmed = remaining.trim();
-            if !trimmed.is_empty() {
-                text_parts.push(trimmed.to_string());
-            }
-            break;
-        };
-        let before = remaining[..open_start].trim();
-        if !before.is_empty() {
-            text_parts.push(before.to_string());
-        }
-        let content_start = open_start + "<tool_call>".len();
-        let Some(close_offset) = remaining[content_start..].find("</tool_call>") else {
-            let trimmed = remaining.trim();
-            if !trimmed.is_empty() {
-                text_parts.push(trimmed.to_string());
-            }
-            break;
-        };
-        let close_start = content_start + close_offset;
-        let block = remaining[content_start..close_start].trim();
-        if let Some(tc) = parse_single_tool_call(block) {
-            tool_calls.push(tc);
-        }
-        remaining = &remaining[close_start + "</tool_call>".len()..];
-    }
-    if tool_calls.is_empty() {
-        return None;
-    }
-    let surrounding_text = if text_parts.is_empty() {
-        None
-    } else {
-        Some(text_parts.join("\n"))
-    };
-    Some(ParsedResponse {
-        tool_calls,
-        surrounding_text,
-    })
-}
-
-fn parse_single_tool_call(block: &str) -> Option<ToolCall> {
-    Some(ToolCall {
-        component: extract_tag(block, "component")?,
-        function: extract_tag(block, "function")?,
-        args: extract_tag(block, "args").unwrap_or_else(|| "{}".to_string()),
-    })
-}
-
-fn extract_tag(text: &str, tag: &str) -> Option<String> {
-    let open = format!("<{tag}>");
-    let close = format!("</{tag}>");
-    let start = text.find(&open)? + open.len();
-    let end = text[start..].find(&close)? + start;
-    Some(text[start..end].trim().to_string())
-}
-
-fn load_history(host_dir: &str) -> Vec<Message> {
+fn load_history(host_dir: &str) -> Vec<ChatMessage> {
     let path = format!("{host_dir}/conversation.json");
     match std::fs::read_to_string(&path) {
-        Ok(contents) if !contents.trim().is_empty() => serde_json::from_str(&contents)
-            .unwrap_or_else(|e| {
-                eprintln!("error: failed to parse conversation.json: {e}");
-                Vec::new()
-            }),
+        Ok(contents) if !contents.trim().is_empty() => {
+            let persisted: Vec<PersistedMessage> =
+                serde_json::from_str(&contents).unwrap_or_else(|e| {
+                    eprintln!("error: failed to parse conversation.json: {e}");
+                    Vec::new()
+                });
+            persisted.iter().map(|m| m.to_chat_message()).collect()
+        }
         Ok(_) => Vec::new(),
         Err(_) => Vec::new(),
     }
 }
 
-fn save_history(host_dir: &str, history: &[Message]) {
+fn save_history(host_dir: &str, history: &[ChatMessage]) {
     let path = format!("{host_dir}/conversation.json");
-    match serde_json::to_string_pretty(history) {
+    let persisted: Vec<PersistedMessage> =
+        history.iter().map(PersistedMessage::from_chat_message).collect();
+    match serde_json::to_string_pretty(&persisted) {
         Ok(json) => {
             if let Err(e) = std::fs::write(&path, json) {
                 eprintln!("error: failed to write conversation.json: {e}");
