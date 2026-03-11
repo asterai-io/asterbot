@@ -7,7 +7,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const MAX_SUGGESTIONS: usize = 3;
-const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
+const DEFAULT_SYSTEM_PROMPT: &str = "\
+You are a personal AI assistant running inside Asterbot.
+
+Be direct, concise, and genuinely helpful. Don't narrate routine \
+actions — just do them. Be resourceful: check your memory, read \
+files, and search for context before asking the user. Admit when \
+you don't know something rather than guessing. Have a point of \
+view — you're not a generic search engine.";
 const DEFAULT_MAX_TOOL_ROUNDS: usize = 10;
 const TOOL_RESULT_TRUNCATE_CHARS: usize = 10_000;
 // ~120k tokens at ~4 chars/token, leaving room for model response.
@@ -190,6 +197,17 @@ impl Guest for Component {
                 });
             }
             rounds_remaining -= 1;
+            if rounds_remaining >= 1 && rounds_remaining <= 2 {
+                let note = match rounds_remaining {
+                    1 => "\n\n[System: final tool round. \
+                    Provide your response to the user now.]".to_owned(),
+                    x => format!("\n\n[System: {x} tool rounds remaining. \
+                    Begin wrapping up.]"),
+                };
+                if let Some(last) = history.last_mut() {
+                    last.content.push_str(&note);
+                }
+            }
             if rounds_remaining == 0 {
                 let msg = "max tool rounds reached".to_string();
                 history.push(ChatMessage {
@@ -207,41 +225,96 @@ impl Guest for Component {
 
 fn build_system_message(host_dir: &str, input: &str) -> ChatMessage {
     let mut content = resolve_system_prompt(host_dir);
+    let model = std::env::var("ASTERBOT_MODEL").unwrap_or_default();
     let soul = fetch_soul();
-    let skill_hints = suggest_files("asterbot:skills", "skills/list-all", input);
-    let memory_hints = suggest_files("asterbot:memory", "memory/list-all", input);
-    if !soul.is_empty() {
-        content.push_str("\n\nYour soul (personality & self-knowledge):\n");
-        content.push_str(&soul);
+    let memory_names = list_component_files("asterbot:memory", "memory/list-all");
+    let skill_names = list_component_files("asterbot:skills", "skills/list-all");
+
+    // Context awareness.
+    content.push_str("\n\n## Context\n");
+    if !model.is_empty() {
+        content.push_str(&format!("Model: {model}\n"));
     }
-    if !skill_hints.is_empty() {
+    content.push_str(
+        "Your conversation history is persisted across sessions. \
+        However, older messages may be trimmed from context when \
+        conversations get long — rely on your memory tools for \
+        important information rather than assuming old messages \
+        are still visible.",
+    );
+
+    // Soul.
+    if let Some(soul_content) = &soul {
+        content.push_str("\n\n## Soul\n");
         content.push_str(
-            "\n\nThe following skills may be relevant \
-            (stored as .md files in skills/). \
-            You can read, create, edit, or delete them using the tools.\n",
+            "Your soul defines your personality and self-knowledge. \
+            Embody it. You may evolve it as you learn about yourself, \
+            but do so thoughtfully.\n",
         );
-        for name in &skill_hints {
-            content.push_str(&format!("- {name}.md\n"));
+        if !soul_content.is_empty() {
+            content.push_str("\n");
+            content.push_str(soul_content);
         }
-        content.push_str(
-            "These are just the top matches. \
-            You may list all available using the tools.",
-        );
     }
-    if !memory_hints.is_empty() {
+
+    // Tool guidance.
+    content.push_str(
+        "\n\n## Tool usage\n\
+        Use your tools proactively and efficiently:\n\
+        - Verify before guessing. Read before writing. Search before asking.\n\
+        - Prefer the simplest approach. Don't chain unnecessary tool calls.\n\
+        - If a tool call fails, try a different approach rather than \
+        retrying the same thing.",
+    );
+
+    // Memory (mandatory).
+    if let Some(names) = &memory_names {
         content.push_str(
-            "\n\nThe following memories may be relevant \
-            (stored as .md files in memory/). \
-            You can read, create, edit, or delete them using the tools.\n",
+            "\n\n## Memory\n\
+            You have persistent memory across conversations, stored as \
+            named .md files you can read, create, update, and delete.\n\n\
+            MANDATORY: Before answering questions about prior conversations, \
+            user preferences, past decisions, or anything that might have \
+            been discussed before, check your memories first.\n\n\
+            Proactively save important things you learn — user preferences, \
+            key decisions, useful context. Don't wait to be asked. Update \
+            or remove stale memories rather than letting them accumulate.",
         );
-        for name in &memory_hints {
-            content.push_str(&format!("- {name}.md\n"));
+        let hints = suggest_from_names(names, input);
+        if !hints.is_empty() {
+            content.push_str("\n\nMemories that may be relevant:\n");
+            for name in &hints {
+                content.push_str(&format!("- {name}\n"));
+            }
+            content.push_str(
+                "These are the top matches. Use the list tool to see all.",
+            );
         }
-        content.push_str(
-            "These are just the top matches. \
-            You may list all available using the tools.",
-        );
     }
+
+    // Skills (mandatory).
+    if let Some(names) = &skill_names {
+        content.push_str(
+            "\n\n## Skills\n\
+            You have a persistent skill library, stored as named .md \
+            files you can read, create, update, and delete.\n\n\
+            MANDATORY: Before attempting a complex or multi-step task, \
+            check if a relevant skill exists.\n\n\
+            After completing a complex workflow (3+ tool calls), \
+            consider saving the approach as a skill for future use.",
+        );
+        let hints = suggest_from_names(names, input);
+        if !hints.is_empty() {
+            content.push_str("\n\nSkills that may be relevant:\n");
+            for name in &hints {
+                content.push_str(&format!("- {name}\n"));
+            }
+            content.push_str(
+                "These are the top matches. Use the list tool to see all.",
+            );
+        }
+    }
+
     ChatMessage {
         role: ChatRole::System,
         content,
@@ -379,25 +452,26 @@ fn trim_history(history: &[ChatMessage]) -> &[ChatMessage] {
     &history[start..]
 }
 
-fn fetch_soul() -> String {
+fn fetch_soul() -> Option<String> {
     match api::call_component_function("asterbot:soul", "soul/get", "[]") {
         Ok(result) => {
             let content = decode_json_string(&result);
-            if content.trim().is_empty() {
-                String::new()
-            } else {
-                content
-            }
+            Some(content.trim().to_string())
         }
-        Err(_) => String::new(),
+        Err(_) => None,
     }
 }
 
-fn suggest_files(component: &str, list_fn: &str, input: &str) -> Vec<String> {
-    let names: Vec<String> = match api::call_component_function(component, list_fn, "[]") {
-        Ok(result) => serde_json::from_str(&result).unwrap_or_default(),
-        Err(_) => return Vec::new(),
-    };
+/// Returns Some(names) if the component is available, None if not.
+fn list_component_files(component: &str, list_fn: &str) -> Option<Vec<String>> {
+    match api::call_component_function(component, list_fn, "[]") {
+        Ok(result) => Some(serde_json::from_str(&result).unwrap_or_default()),
+        Err(_) => None,
+    }
+}
+
+/// Rank file names by keyword overlap with the user input.
+fn suggest_from_names(names: &[String], input: &str) -> Vec<String> {
     if names.is_empty() {
         return Vec::new();
     }
