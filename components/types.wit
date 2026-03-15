@@ -118,18 +118,42 @@ interface skills {
 /// Pluggable — swap the implementation to change
 /// where history is stored (local fs, cloud, etc.).
 /// The default implementation uses asterai:fs.
+///
+/// History is stored as a single conversation.json with
+/// the full message archive, a compaction cursor, and
+/// rolling summaries (user profile, conversation, bond).
 interface history {
   use asterai:llm/llm@1.1.0.{chat-message};
 
-  /// Load the full conversation history.
+  /// Load the working conversation history (messages
+  /// after the compaction cursor). This is what gets
+  /// fed to the LLM context window.
   load: func() -> list<chat-message>;
 
-  /// Save the full conversation history, replacing
-  /// whatever was previously stored.
+  /// Save the working conversation history. The
+  /// implementation merges these with the archived
+  /// (pre-cursor) messages internally, keeping the
+  /// full history intact.
   save: func(messages: list<chat-message>);
 
-  /// Clear all conversation history.
+  /// Clear all conversation history, summaries, and
+  /// context. Resets everything.
   clear: func();
+
+  /// Returns assembled context for the system prompt.
+  /// Includes user profile, conversation summary, and
+  /// bond — only sections that exist.
+  get-context: func() -> string;
+
+  /// Check whether the working set should be compacted
+  /// based on its message count.
+  should-compact: func(message-count: u32) -> bool;
+
+  /// Compact the working set: summarise older messages
+  /// into long-term context, advance the compaction
+  /// cursor, and return the trimmed working set.
+  compact: func(messages: list<chat-message>)
+    -> list<chat-message>;
 }
 
 world asterbot {

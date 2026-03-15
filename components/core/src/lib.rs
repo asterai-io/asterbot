@@ -141,6 +141,12 @@ impl Guest for Component {
             Err(e) => return e,
         };
         let mut history = load_history();
+        // TODO: Run compaction asynchronously after response
+        // delivery to avoid blocking the user. Consider
+        // asterai:host-cron for deferred execution.
+        if should_compact_history(history.len()) {
+            history = compact_history(history);
+        }
         let system_message = build_system_message(&host_dir, &input);
         let tools = get_tool_entries();
         history.push(ChatMessage {
@@ -258,7 +264,12 @@ fn build_system_message(host_dir: &str, input: &str) -> ChatMessage {
             content.push_str(soul_content);
         }
     }
-
+    // History context (user profile, conversation summary, bond).
+    let history_context = get_history_context();
+    if !history_context.is_empty() {
+        content.push_str("\n\n");
+        content.push_str(&history_context);
+    }
     // Tool guidance.
     content.push_str(
         "\n\n## Tool usage\n\
@@ -454,6 +465,13 @@ fn trim_history(history: &[ChatMessage]) -> &[ChatMessage] {
     &history[start..]
 }
 
+fn get_history_context() -> String {
+    match api::call_component_function("asterbot:history", "history/get-context", "[]") {
+        Ok(result) => decode_json_string(&result),
+        Err(_) => String::new(),
+    }
+}
+
 fn fetch_soul() -> Option<String> {
     match api::call_component_function("asterbot:soul", "soul/get", "[]") {
         Ok(result) => {
@@ -558,6 +576,45 @@ fn load_history() -> Vec<ChatMessage> {
         Err(e) => {
             eprintln!("error: failed to load history: {:?}: {}", e.kind, e.message);
             Vec::new()
+        }
+    }
+}
+
+fn should_compact_history(count: usize) -> bool {
+    let args = format!("[{}]", count);
+    match api::call_component_function(
+        "asterbot:history",
+        "history/should-compact",
+        &args,
+    ) {
+        Ok(result) => result.trim() == "true",
+        Err(_) => false,
+    }
+}
+
+fn compact_history(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    let wit_msgs: Vec<WitChatMessage> = messages
+        .iter()
+        .map(WitChatMessage::from_chat_message)
+        .collect();
+    let json = serde_json::to_string(&wit_msgs).unwrap_or_default();
+    let args = format!("[{json}]");
+    match api::call_component_function(
+        "asterbot:history",
+        "history/compact",
+        &args,
+    ) {
+        Ok(result) => {
+            let msgs: Vec<WitChatMessage> =
+                serde_json::from_str(&result).unwrap_or_default();
+            msgs.iter().map(|m| m.to_chat_message()).collect()
+        }
+        Err(e) => {
+            eprintln!(
+                "error: compaction failed: {:?}: {}",
+                e.kind, e.message,
+            );
+            messages
         }
     }
 }
