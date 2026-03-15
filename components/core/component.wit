@@ -1,7 +1,7 @@
-package asterbot:core@1.1.1;
+package asterbot:core@1.2.0;
 
 world component {
   import asterai:host/api@1.0.0;
   import asterai:llm/llm@1.1.0;
-  export asterbot:types/core@1.0.0;
+  export asterbot:types/core@1.1.0;
 }

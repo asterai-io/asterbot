@@ -31,25 +31,50 @@ mod bindings {
 
 struct Component;
 
-/// Serializable version of ChatMessage for conversation.json persistence.
-#[derive(Serialize, Deserialize, Clone)]
-struct PersistedMessage {
+/// WIT JSON encoding of ChatMessage for the dynamic call boundary.
+/// Uses kebab-case field names to match the WIT component model.
+#[derive(Serialize, Deserialize)]
+struct WitChatMessage {
     role: String,
     content: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    tool_calls: Vec<PersistedToolCall>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tool-calls", default, skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<WitToolCall>,
+    #[serde(rename = "tool-call-id", default, skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-struct PersistedToolCall {
+#[derive(Serialize, Deserialize)]
+struct WitToolCall {
     id: String,
     name: String,
+    #[serde(rename = "arguments-json")]
     arguments_json: String,
 }
 
-impl PersistedMessage {
+impl WitChatMessage {
+    fn from_chat_message(msg: &ChatMessage) -> Self {
+        let role = match msg.role {
+            ChatRole::System => "system",
+            ChatRole::User => "user",
+            ChatRole::Assistant => "assistant",
+            ChatRole::Tool => "tool",
+        };
+        WitChatMessage {
+            role: role.to_string(),
+            content: msg.content.clone(),
+            tool_calls: msg
+                .tool_calls
+                .iter()
+                .map(|tc| WitToolCall {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments_json: tc.arguments_json.clone(),
+                })
+                .collect(),
+            tool_call_id: msg.tool_call_id.clone(),
+        }
+    }
+
     fn to_chat_message(&self) -> ChatMessage {
         let role = match self.role.as_str() {
             "system" => ChatRole::System,
@@ -71,29 +96,6 @@ impl PersistedMessage {
                 })
                 .collect(),
             tool_call_id: self.tool_call_id.clone(),
-        }
-    }
-
-    fn from_chat_message(msg: &ChatMessage) -> Self {
-        let role = match msg.role {
-            ChatRole::System => "system",
-            ChatRole::User => "user",
-            ChatRole::Assistant => "assistant",
-            ChatRole::Tool => "tool",
-        };
-        PersistedMessage {
-            role: role.to_string(),
-            content: msg.content.clone(),
-            tool_calls: msg
-                .tool_calls
-                .iter()
-                .map(|tc| PersistedToolCall {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    arguments_json: tc.arguments_json.clone(),
-                })
-                .collect(),
-            tool_call_id: msg.tool_call_id.clone(),
         }
     }
 }
@@ -138,7 +140,7 @@ impl Guest for Component {
             Ok(d) => d,
             Err(e) => return e,
         };
-        let mut history = load_history(&host_dir);
+        let mut history = load_history();
         let system_message = build_system_message(&host_dir, &input);
         let tools = get_tool_entries();
         history.push(ChatMessage {
@@ -155,7 +157,7 @@ impl Guest for Component {
             messages.extend(trim_history(&history).iter().cloned());
             let response = chat(&messages, &tool_defs, &model);
             if response.content.starts_with("error: ") && response.tool_calls.is_empty() {
-                save_history(&host_dir, &history);
+                save_history(&history);
                 return response.content;
             }
             if response.tool_calls.is_empty() {
@@ -165,7 +167,7 @@ impl Guest for Component {
                     tool_calls: Vec::new(),
                     tool_call_id: None,
                 });
-                save_history(&host_dir, &history);
+                save_history(&history);
                 return response.content;
             }
             history.push(ChatMessage {
@@ -216,7 +218,7 @@ impl Guest for Component {
                     tool_calls: Vec::new(),
                     tool_call_id: None,
                 });
-                save_history(&host_dir, &history);
+                save_history(&history);
                 return msg;
             }
         }
@@ -543,33 +545,30 @@ fn call_tool(component: &str, function: &str, args: &str) -> String {
     }
 }
 
-fn load_history(host_dir: &str) -> Vec<ChatMessage> {
-    let path = format!("{host_dir}/conversation.json");
-    match std::fs::read_to_string(&path) {
-        Ok(contents) if !contents.trim().is_empty() => {
-            let persisted: Vec<PersistedMessage> =
-                serde_json::from_str(&contents).unwrap_or_else(|e| {
-                    eprintln!("error: failed to parse conversation.json: {e}");
+fn load_history() -> Vec<ChatMessage> {
+    match api::call_component_function("asterbot:history", "history/load", "[]") {
+        Ok(json) => {
+            let msgs: Vec<WitChatMessage> =
+                serde_json::from_str(&json).unwrap_or_else(|e| {
+                    eprintln!("error: failed to parse history from component: {e}");
                     Vec::new()
                 });
-            persisted.iter().map(|m| m.to_chat_message()).collect()
+            msgs.iter().map(|m| m.to_chat_message()).collect()
         }
-        Ok(_) => Vec::new(),
-        Err(_) => Vec::new(),
+        Err(e) => {
+            eprintln!("error: failed to load history: {:?}: {}", e.kind, e.message);
+            Vec::new()
+        }
     }
 }
 
-fn save_history(host_dir: &str, history: &[ChatMessage]) {
-    let path = format!("{host_dir}/conversation.json");
-    let persisted: Vec<PersistedMessage> =
-        history.iter().map(PersistedMessage::from_chat_message).collect();
-    match serde_json::to_string_pretty(&persisted) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, json) {
-                eprintln!("error: failed to write conversation.json: {e}");
-            }
-        }
-        Err(e) => eprintln!("error: failed to serialize history: {e}"),
+fn save_history(history: &[ChatMessage]) {
+    let msgs: Vec<WitChatMessage> =
+        history.iter().map(WitChatMessage::from_chat_message).collect();
+    let json = serde_json::to_string(&msgs).unwrap_or_default();
+    let args = format!("[{json}]");
+    if let Err(e) = api::call_component_function("asterbot:history", "history/save", &args) {
+        eprintln!("error: failed to save history: {:?}: {}", e.kind, e.message);
     }
 }
 

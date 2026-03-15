@@ -1,0 +1,14 @@
+package asterbot:history@1.0.0;
+
+/// Default conversation history backend.
+///
+/// Persists history as conversation.json via the
+/// asterai:fs interface. Swap asterai:fs-local for
+/// an S3 or cloud backend to change storage without
+/// modifying this component.
+world component {
+  import asterai:host/api@1.0.0;
+  import asterai:fs/fs@1.0.0;
+  import asterai:llm/llm@1.1.0;
+  export asterbot:types/history@1.1.0;
+}

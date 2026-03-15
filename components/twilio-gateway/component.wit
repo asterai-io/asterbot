@@ -17,7 +17,7 @@ package asterbot:twilio-gateway@0.1.0;
 /// If both are set, TWILIO_ALLOWED_PHONES
 /// takes priority.
 world component {
-  import asterbot:types/agent@1.0.0;
+  import asterbot:types/agent@1.1.0;
   import asterai:twilio/api@0.1.0;
 
   export asterai:twilio/incoming-handler@0.1.0;

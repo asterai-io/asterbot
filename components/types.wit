@@ -1,4 +1,4 @@
-package asterbot:types@1.0.0;
+package asterbot:types@1.1.0;
 
 /// Shared types used across asterbot components.
 interface types {
@@ -112,6 +112,24 @@ interface skills {
 
   /// Delete a skill. No-op if it doesn't exist.
   remove: func(name: string);
+}
+
+/// Conversation history backend.
+/// Pluggable — swap the implementation to change
+/// where history is stored (local fs, cloud, etc.).
+/// The default implementation uses asterai:fs.
+interface history {
+  use asterai:llm/llm@1.1.0.{chat-message};
+
+  /// Load the full conversation history.
+  load: func() -> list<chat-message>;
+
+  /// Save the full conversation history, replacing
+  /// whatever was previously stored.
+  save: func(messages: list<chat-message>);
+
+  /// Clear all conversation history.
+  clear: func();
 }
 
 world asterbot {
