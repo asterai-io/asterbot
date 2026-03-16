@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 const HISTORY_FILENAME: &str = "conversation.json";
 const DEFAULT_COMPACTION_THRESHOLD: usize = 50;
-const DEFAULT_KEEP_RECENT_TURNS: usize = 10;
 const TOOL_RESULT_PREVIEW_CHARS: usize = 200;
 
 #[cfg(not(test))]
@@ -162,36 +161,12 @@ impl Guest for Component {
 
     fn compact(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
         let model = std::env::var("ASTERBOT_MODEL").unwrap_or_default();
-        if model.is_empty() {
+        if model.is_empty() || messages.is_empty() {
             return messages;
         }
-
-        let keep_turns = std::env::var("ASTERBOT_KEEP_RECENT_TURNS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(DEFAULT_KEEP_RECENT_TURNS);
-
-        let roles: Vec<&str> = messages
-            .iter()
-            .map(|m| match m.role {
-                ChatRole::User => "user",
-                ChatRole::Assistant => "assistant",
-                ChatRole::System => "system",
-                ChatRole::Tool => "tool",
-            })
-            .collect();
-        let cut = find_cut_point(&roles, keep_turns);
-        if cut == 0 {
-            return messages;
-        }
-
         let mut state = read_state();
-
-        // Split into old (to summarise) and recent (to keep).
-        let mut owned = messages;
-        let recent = owned.split_off(cut);
-        let old = owned;
-
+        // Compact the entire working set into summaries.
+        let old = messages;
         let formatted = format_messages_for_summary(&old);
         let prompt = build_compaction_prompt(
             &formatted,
@@ -199,10 +174,8 @@ impl Guest for Component {
             &state.user_summary,
             &state.bond_summary,
         );
-
         let tools = vec![build_compaction_tool()];
         let response = chat(&prompt, &tools, &model);
-
         // Parse the structured tool call response.
         let llm_ok = if let Some(tc) = response.tool_calls.first() {
             match serde_json::from_str::<CompactionResult>(&tc.arguments_json) {
@@ -233,7 +206,6 @@ impl Guest for Component {
             );
             false
         };
-
         // Fallback: raw text summary when LLM fails.
         if !llm_ok {
             let fallback = truncate_str(&formatted, 500);
@@ -246,35 +218,11 @@ impl Guest for Component {
                 );
             }
         }
-
-        // Always advance the cursor.
-        state.compacted_through += cut;
+        // Advance cursor past all compacted messages.
+        state.compacted_through += old.len();
         write_state(&state);
-
-        recent
+        vec![]
     }
-}
-
-/// Find the cut point: keep the last `keep_turns` user
-/// messages (and everything after them). Returns the
-/// index of the oldest kept user message, or 0 if there
-/// aren't enough turns to justify compaction.
-fn find_cut_point(roles: &[&str], keep_turns: usize) -> usize {
-    let user_indices: Vec<usize> = roles
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| **r == "user")
-        .map(|(i, _)| i)
-        .collect();
-    // Need at least 2 user turns to compact anything.
-    if user_indices.len() <= 1 {
-        return 0;
-    }
-    // Keep at most keep_turns, but always compact at least 1.
-    let keep = keep_turns.min(user_indices.len() - 1);
-    // Cut at the oldest user message we want to keep.
-    // Everything before it gets compacted.
-    user_indices[user_indices.len() - keep]
 }
 
 fn format_context(state: &ConversationState) -> String {
@@ -506,51 +454,20 @@ mod tests {
         }
     }
 
-    fn assistant_tool_call(call_id: &str, name: &str) -> PersistedMessage {
-        PersistedMessage {
-            role: "assistant".to_string(),
-            content: String::new(),
-            tool_calls: vec![PersistedToolCall {
-                id: call_id.to_string(),
-                name: name.to_string(),
-                arguments_json: "{}".to_string(),
-            }],
-            tool_call_id: None,
-        }
-    }
-
-    fn tool_result(content: &str, call_id: &str) -> PersistedMessage {
-        PersistedMessage {
-            role: "tool".to_string(),
-            content: content.to_string(),
-            tool_calls: vec![],
-            tool_call_id: Some(call_id.to_string()),
-        }
-    }
-
-    fn roles(msgs: &[PersistedMessage]) -> Vec<&str> {
-        msgs.iter().map(|m| m.role.as_str()).collect()
-    }
-
     /// Simulate what core does: load → compact → save.
-    /// Returns (state_after, working_set_returned_to_core).
-    fn simulate_compact(state: &mut ConversationState, keep_turns: usize) -> Vec<PersistedMessage> {
-        // load: return history[compactedThrough..]
+    /// Returns the working set returned to core (empty after compaction).
+    fn simulate_compact(state: &mut ConversationState) -> Vec<PersistedMessage> {
         let start = state.compacted_through.min(state.history.len());
         let working_set: Vec<PersistedMessage> = state.history[start..].to_vec();
 
-        // compact
-        let r = roles(&working_set);
-        let cut = find_cut_point(&r, keep_turns);
-        if cut == 0 {
+        if working_set.is_empty() {
             return working_set;
         }
 
-        state.compacted_through += cut;
-        state.conversation_summary = format!("Compacted through turn {}", state.compacted_through);
+        state.compacted_through += working_set.len();
+        state.conversation_summary = format!("Compacted through index {}", state.compacted_through);
 
-        // Return the trimmed working set
-        working_set[cut..].to_vec()
+        vec![]
     }
 
     /// Simulate what core does after compact: add new
@@ -561,105 +478,37 @@ mod tests {
         state.history.extend_from_slice(working_set);
     }
 
-    #[test]
-    fn cut_point_basic() {
-        // 5 user turns, keep 3
-        let msgs = vec![
-            user("1"),
-            assistant("r1"),
-            user("2"),
-            assistant("r2"),
-            user("3"),
-            assistant("r3"),
-            user("4"),
-            assistant("r4"),
-            user("5"),
-            assistant("r5"),
-        ];
-        let r = roles(&msgs);
-        // Keep last 3 users (3,4,5) at indices 4,6,8. Cut at 4.
-        assert_eq!(find_cut_point(&r, 3), 4);
+    /// Simulate compact where the LLM call fails.
+    /// Fallback: raw text summary, advance cursor.
+    fn simulate_compact_llm_fails(state: &mut ConversationState) -> Vec<PersistedMessage> {
+        let start = state.compacted_through.min(state.history.len());
+        let working_set: Vec<PersistedMessage> = state.history[start..].to_vec();
+
+        if working_set.is_empty() {
+            return working_set;
+        }
+
+        // LLM fails → fallback raw summary, still advance.
+        let fallback: String = working_set
+            .iter()
+            .map(|m| format!("[{}]: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if state.conversation_summary.is_empty() {
+            state.conversation_summary = fallback;
+        } else {
+            state.conversation_summary = format!(
+                "{}\n\n[auto-compacted]\n{}",
+                state.conversation_summary, fallback,
+            );
+        }
+
+        state.compacted_through += working_set.len();
+        vec![]
     }
 
     #[test]
-    fn cut_point_not_enough_turns() {
-        // 3 user turns, keep 3 → still compacts 1 turn
-        // (keep is capped to user_turns - 1)
-        let msgs = vec![
-            user("1"),
-            assistant("r1"),
-            user("2"),
-            assistant("r2"),
-            user("3"),
-            assistant("r3"),
-        ];
-        let r = roles(&msgs);
-        // keep = min(3, 2) = 2, cut at user_indices[1] = 2
-        assert_eq!(find_cut_point(&r, 3), 2);
-    }
-
-    #[test]
-    fn cut_point_single_user_turn() {
-        // 1 user turn → nothing to compact
-        let msgs = vec![user("1"), assistant("r1")];
-        let r = roles(&msgs);
-        assert_eq!(find_cut_point(&r, 3), 0);
-    }
-
-    #[test]
-    fn cut_point_exactly_one_more() {
-        // 4 user turns, keep 3 → compact 1 turn
-        let msgs = vec![
-            user("1"),
-            assistant("r1"),
-            user("2"),
-            assistant("r2"),
-            user("3"),
-            assistant("r3"),
-            user("4"),
-            assistant("r4"),
-        ];
-        let r = roles(&msgs);
-        // Keep last 3 (2,3,4) at indices 2,4,6. Cut at 2.
-        assert_eq!(find_cut_point(&r, 3), 2);
-    }
-
-    #[test]
-    fn cut_point_with_tool_calls() {
-        let msgs = vec![
-            user("1"),                           // 0
-            assistant_tool_call("c1", "search"), // 1
-            tool_result("found it", "c1"),       // 2
-            assistant("Here's what I found"),    // 3
-            user("2"),                           // 4
-            assistant("r2"),                     // 5
-            user("3"),                           // 6
-            assistant("r3"),                     // 7
-            user("4"),                           // 8
-            assistant("r4"),                     // 9
-        ];
-        let r = roles(&msgs);
-        // 4 users at 0, 4, 6, 8. Keep 3 → cut at 4.
-        assert_eq!(find_cut_point(&r, 3), 4);
-    }
-
-    #[test]
-    fn cut_point_keep_1() {
-        let msgs = vec![
-            user("1"),
-            assistant("r1"),
-            user("2"),
-            assistant("r2"),
-            user("3"),
-            assistant("r3"),
-        ];
-        let r = roles(&msgs);
-        // Keep 1 → cut at index 4 (user "3")
-        assert_eq!(find_cut_point(&r, 1), 4);
-    }
-
-    #[test]
-    fn single_compaction_preserves_all_history() {
+    fn single_compaction_compacts_everything() {
         let mut state = ConversationState {
             history: vec![
                 user("1"),
@@ -668,86 +517,77 @@ mod tests {
                 assistant("r2"),
                 user("3"),
                 assistant("r3"),
-                user("4"),
-                assistant("r4"),
-                user("5"),
-                assistant("r5"),
             ],
             ..Default::default()
         };
 
-        let trimmed = simulate_compact(&mut state, 3);
+        let trimmed = simulate_compact(&mut state);
 
-        // Cut at 4: compact first 2 user turns
-        assert_eq!(state.compacted_through, 4);
-        assert_eq!(trimmed.len(), 6); // 3 user turns + responses
-        assert_eq!(trimmed[0].content, "3");
+        // All 6 messages compacted
+        assert_eq!(state.compacted_through, 6);
+        assert!(trimmed.is_empty());
 
         // Core adds a new turn
         let mut working = trimmed;
-        working.push(user("6"));
-        working.push(assistant("r6"));
+        working.push(user("4"));
+        working.push(assistant("r4"));
         simulate_save(&mut state, &working);
 
         // Full history preserved
-        assert_eq!(state.history.len(), 12);
+        assert_eq!(state.history.len(), 8);
         assert_eq!(state.history[0].content, "1"); // archived
-        assert_eq!(state.history[11].content, "r6"); // newest
+        assert_eq!(state.history[7].content, "r4"); // newest
     }
 
     #[test]
     fn multiple_compaction_cycles() {
         let mut state = ConversationState::default();
+        let threshold = 10;
 
-        // Build up 5 user turns (10 messages)
+        // Build up 5 turns (10 messages)
         for i in 1..=5 {
             state.history.push(user(&format!("u{i}")));
             state.history.push(assistant(&format!("a{i}")));
         }
 
-        // Cycle 1: keep 3 → compact 2
-        let trimmed = simulate_compact(&mut state, 3);
-        assert_eq!(state.compacted_through, 4);
-        assert_eq!(trimmed.len(), 6);
+        // Cycle 1: compact all 10
+        let trimmed = simulate_compact(&mut state);
+        assert_eq!(state.compacted_through, 10);
+        assert!(trimmed.is_empty());
 
-        // Core adds 3 more turns
+        // Core adds 6 more turns
         let mut working = trimmed;
-        for i in 6..=8 {
+        for i in 6..=11 {
             working.push(user(&format!("u{i}")));
             working.push(assistant(&format!("a{i}")));
         }
         simulate_save(&mut state, &working);
-        assert_eq!(state.history.len(), 16);
+        assert_eq!(state.history.len(), 22);
 
-        // Cycle 2: working set is 12 msgs, 6 user turns
-        let trimmed = simulate_compact(&mut state, 3);
-        // 6 users in working set, keep 3 → compact 3
-        // User indices in working set: 0,2,4,6,8,10
-        // Cut at index user_indices[6-3] = [3] = 6
-        assert_eq!(state.compacted_through, 4 + 6);
-        assert_eq!(trimmed.len(), 6); // last 3 turns
+        // Cycle 2: working set is 12 msgs, compact all
+        let working_len = state.history.len() - state.compacted_through;
+        assert_eq!(working_len, 12);
+        let trimmed = simulate_compact(&mut state);
+        assert_eq!(state.compacted_through, 22);
+        assert!(trimmed.is_empty());
 
         // Core adds 1 more turn
         let mut working = trimmed;
-        working.push(user("u9"));
-        working.push(assistant("a9"));
+        working.push(user("u12"));
+        working.push(assistant("a12"));
         simulate_save(&mut state, &working);
 
         // ALL messages still in history
-        assert_eq!(state.history.len(), 18);
+        assert_eq!(state.history.len(), 24);
         assert_eq!(state.history[0].content, "u1");
-        assert_eq!(state.history[17].content, "a9");
+        assert_eq!(state.history[23].content, "a12");
     }
 
     #[test]
-    fn compaction_with_threshold_10_keep_3_realistic() {
-        // Reproduce the user's scenario: threshold=10, keep=3
+    fn compaction_with_threshold_10_realistic() {
         let mut state = ConversationState::default();
         let threshold = 10;
-        let keep_turns = 3;
 
-        // Send messages one turn at a time, compacting
-        // when the working set hits threshold.
         for turn in 1..=10 {
             state.history.push(user(&format!("u{turn}")));
             state.history.push(assistant(&format!("a{turn}")));
@@ -755,23 +595,18 @@ mod tests {
             let working_len = state.history.len() - state.compacted_through;
 
             if working_len >= threshold {
-                let trimmed = simulate_compact(&mut state, keep_turns);
-                let mut working = trimmed;
-                // (no new message this cycle, compact happened
-                // before LLM call in the real flow)
-                simulate_save(&mut state, &working);
+                let trimmed = simulate_compact(&mut state);
+                simulate_save(&mut state, &trimmed);
             }
         }
 
-        // After 10 turns (20 messages), compaction should
-        // have fired at least twice. The cursor should have
-        // advanced well past 2.
+        // Compaction fires at 10 msgs and compacts everything.
+        // Then new turns accumulate until threshold again.
         assert!(
-            state.compacted_through > 2,
-            "compacted_through should be > 2, got {}",
+            state.compacted_through >= 10,
+            "compacted_through should be >= 10, got {}",
             state.compacted_through,
         );
-        // All 20 messages preserved
         assert_eq!(state.history.len(), 20);
         assert_eq!(state.history[0].content, "u1");
         assert_eq!(state.history[19].content, "a10");
@@ -787,7 +622,7 @@ mod tests {
 
             let working_len = state.history.len() - state.compacted_through;
             if working_len >= 10 {
-                let trimmed = simulate_compact(&mut state, 3);
+                let trimmed = simulate_compact(&mut state);
                 simulate_save(&mut state, &trimmed);
             }
         }
@@ -800,50 +635,10 @@ mod tests {
         }
     }
 
-    /// Simulate compact where the LLM call fails.
-    /// Fallback: raw text summary, advance cursor,
-    /// return trimmed working set.
-    fn simulate_compact_llm_fails(
-        state: &mut ConversationState,
-        keep_turns: usize,
-    ) -> Vec<PersistedMessage> {
-        let start = state.compacted_through.min(state.history.len());
-        let working_set: Vec<PersistedMessage> = state.history[start..].to_vec();
-
-        let r = roles(&working_set);
-        let cut = find_cut_point(&r, keep_turns);
-        if cut == 0 {
-            return working_set;
-        }
-
-        // LLM fails → fallback raw summary, still advance.
-        let old = &working_set[..cut];
-        let fallback: String = old
-            .iter()
-            .map(|m| format!("[{}]: {}", m.role, m.content))
-            .collect::<Vec<_>>()
-            .join("\n");
-        if state.conversation_summary.is_empty() {
-            state.conversation_summary = fallback;
-        } else {
-            state.conversation_summary = format!(
-                "{}\n\n[auto-compacted]\n{}",
-                state.conversation_summary, fallback,
-            );
-        }
-
-        state.compacted_through += cut;
-        working_set[cut..].to_vec()
-    }
-
     #[test]
-    fn llm_failure_should_still_advance_cursor() {
-        // When LLM fails, the cursor should still advance
-        // (with a fallback summary) so the working set
-        // stays bounded.
+    fn llm_failure_still_advances_cursor() {
         let mut state = ConversationState::default();
         let threshold = 10;
-        let keep_turns = 3;
 
         for turn in 1..=10 {
             state.history.push(user(&format!("u{turn}")));
@@ -852,35 +647,25 @@ mod tests {
             let working_len = state.history.len() - state.compacted_through;
 
             if working_len >= threshold {
-                let trimmed = simulate_compact_llm_fails(&mut state, keep_turns);
+                let trimmed = simulate_compact_llm_fails(&mut state);
                 simulate_save(&mut state, &trimmed);
             }
         }
 
-        // Cursor should have advanced past 0
         assert!(
             state.compacted_through > 0,
             "cursor should advance even when LLM fails, \
              got compacted_through={}",
             state.compacted_through,
         );
-        // Working set should be bounded
-        let working_len = state.history.len() - state.compacted_through;
-        assert!(
-            working_len < state.history.len(),
-            "working set ({working_len}) should be smaller \
-             than total history ({})",
-            state.history.len(),
-        );
+        // Fallback summary should exist
+        assert!(!state.conversation_summary.is_empty());
     }
 
     #[test]
     fn working_set_stays_bounded_despite_llm_failures() {
-        // Even with repeated LLM failures, the working set
-        // should never grow much past the threshold.
         let mut state = ConversationState::default();
         let threshold = 10;
-        let keep_turns = 3;
 
         for turn in 1..=15 {
             state.history.push(user(&format!("u{turn}")));
@@ -889,32 +674,25 @@ mod tests {
             let working_len = state.history.len() - state.compacted_through;
 
             if working_len >= threshold {
-                let trimmed = simulate_compact_llm_fails(&mut state, keep_turns);
+                let trimmed = simulate_compact_llm_fails(&mut state);
                 simulate_save(&mut state, &trimmed);
             }
         }
 
         let working_len = state.history.len() - state.compacted_through;
-        // Working set should stay roughly bounded: at most
-        // threshold + one turn of headroom (2 messages).
         assert!(
-            working_len <= threshold + 2,
-            "working set ({working_len}) should stay \
-             bounded near threshold ({threshold}), not \
-             grow to {}",
-            state.history.len(),
+            working_len < threshold,
+            "working set ({working_len}) should be < threshold ({threshold})",
         );
     }
 
     #[test]
-    fn no_wasted_llm_calls_when_stuck() {
-        // Compaction should not fire every single turn
-        // when the LLM keeps failing. Either the fallback
-        // advances the cursor (so threshold isn't hit), or
-        // there's a cooldown/backoff.
+    fn no_wasted_llm_calls() {
+        // Since we compact everything, each compaction fully
+        // resets the working set. Compaction should only fire
+        // when threshold is hit again from scratch.
         let mut state = ConversationState::default();
         let threshold = 10;
-        let keep_turns = 3;
         let mut compact_attempts = 0;
 
         for turn in 1..=15 {
@@ -925,21 +703,18 @@ mod tests {
 
             if working_len >= threshold {
                 compact_attempts += 1;
-                let trimmed = simulate_compact_llm_fails(&mut state, keep_turns);
+                let trimmed = simulate_compact_llm_fails(&mut state);
                 simulate_save(&mut state, &trimmed);
             }
         }
 
-        // With these params, compaction legitimately fires
-        // every ~2 turns (gap = (threshold - 2*keep) / 2).
-        // Over 15 turns that's ~6. Without the fallback fix,
-        // the cursor stays stuck and compaction fires on
-        // EVERY turn after threshold (~11 times).
+        // With full compaction, should only fire twice:
+        // once at 10 msgs, once at 20 msgs (but we only have 15 turns = 30 msgs,
+        // second fire at turn 10 after first compaction).
         assert!(
-            compact_attempts <= 15 / 2,
-            "compaction fired {compact_attempts} times for \
-             15 turns — without fallback it would fire \
-             every turn (~11 times)",
+            compact_attempts <= 3,
+            "compaction fired {compact_attempts} times — \
+             expected at most 3 for 15 turns with threshold 10",
         );
     }
 
@@ -993,15 +768,15 @@ mod tests {
     #[test]
     fn context_includes_all_sections() {
         let state = ConversationState {
-            user_summary: "Lorenzo".into(),
-            conversation_summary: "Talked about Rust".into(),
-            bond_summary: "Technical rapport".into(),
+            user_summary: "Likes Rust and WASM".into(),
+            conversation_summary: "Discussed foo and bar".into(),
+            bond_summary: "Casual and technical".into(),
             ..Default::default()
         };
         let ctx = format_context(&state);
-        assert!(ctx.contains("## User\nLorenzo"));
-        assert!(ctx.contains("## Conversation so far\nTalked about Rust"));
-        assert!(ctx.contains("## Bond\nTechnical rapport"));
+        assert!(ctx.contains("## User\nLikes Rust and WASM"));
+        assert!(ctx.contains("## Conversation so far\nDiscussed foo and bar"));
+        assert!(ctx.contains("## Bond\nCasual and technical"));
     }
 
     #[test]
