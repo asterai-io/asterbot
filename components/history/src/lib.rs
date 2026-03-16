@@ -214,7 +214,9 @@ impl Guest for Component {
         let response = chat(&prompt, &tools, &model);
 
         // Parse the structured tool call response.
-        if let Some(tc) = response.tool_calls.first() {
+        let llm_ok = if let Some(tc) =
+            response.tool_calls.first()
+        {
             match serde_json::from_str::<CompactionResult>(
                 &tc.arguments_json,
             ) {
@@ -230,15 +232,14 @@ impl Guest for Component {
                     if !result.bond.is_empty() {
                         state.bond_summary = result.bond;
                     }
+                    true
                 }
                 Err(e) => {
                     eprintln!(
                         "error: failed to parse compaction \
                          result: {e}"
                     );
-                    let mut all = old;
-                    all.extend(recent);
-                    return all;
+                    false
                 }
             }
         } else {
@@ -246,12 +247,24 @@ impl Guest for Component {
                 "error: compaction LLM did not return \
                  a tool call"
             );
-            let mut all = old;
-            all.extend(recent);
-            return all;
+            false
+        };
+
+        // Fallback: raw text summary when LLM fails.
+        if !llm_ok {
+            let fallback = truncate_str(&formatted, 500);
+            if state.conversation_summary.is_empty() {
+                state.conversation_summary = fallback;
+            } else {
+                state.conversation_summary = format!(
+                    "{}\n\n[auto-compacted]\n{}",
+                    state.conversation_summary,
+                    fallback,
+                );
+            }
         }
 
-        // Advance the cursor.
+        // Always advance the cursor.
         state.compacted_through += cut;
         write_state(&state);
 
@@ -841,9 +854,8 @@ mod tests {
 
 
     /// Simulate compact where the LLM call fails.
-    /// The DESIRED behavior is: fall back to a raw text
-    /// summary, still advance the cursor, return trimmed
-    /// working set.
+    /// Fallback: raw text summary, advance cursor,
+    /// return trimmed working set.
     fn simulate_compact_llm_fails(
         state: &mut ConversationState,
         keep_turns: usize,
@@ -860,10 +872,25 @@ mod tests {
             return working_set;
         }
 
-        // LLM fails → current behavior: return original,
-        // DON'T advance cursor. This is the bug.
-        // Desired: still advance cursor with fallback.
-        working_set
+        // LLM fails → fallback raw summary, still advance.
+        let old = &working_set[..cut];
+        let fallback: String = old
+            .iter()
+            .map(|m| format!("[{}]: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if state.conversation_summary.is_empty() {
+            state.conversation_summary = fallback;
+        } else {
+            state.conversation_summary = format!(
+                "{}\n\n[auto-compacted]\n{}",
+                state.conversation_summary,
+                fallback,
+            );
+        }
+
+        state.compacted_through += cut;
+        working_set[cut..].to_vec()
     }
 
     #[test]
@@ -980,15 +1007,16 @@ mod tests {
             }
         }
 
-        // Should compact at most a few times, not every
-        // turn after threshold. If the fallback works, the
-        // cursor advances and threshold isn't hit again
-        // until enough new messages accumulate.
+        // With these params, compaction legitimately fires
+        // every ~2 turns (gap = (threshold - 2*keep) / 2).
+        // Over 15 turns that's ~6. Without the fallback fix,
+        // the cursor stays stuck and compaction fires on
+        // EVERY turn after threshold (~11 times).
         assert!(
-            compact_attempts <= 3,
-            "compaction fired {compact_attempts} times — \
-             should be ≤3 with proper fallback, not \
-             retrying every turn",
+            compact_attempts <= 15 / 2,
+            "compaction fired {compact_attempts} times for \
+             15 turns — without fallback it would fire \
+             every turn (~11 times)",
         );
     }
 
