@@ -1,9 +1,7 @@
 #[cfg(not(test))]
 use crate::bindings::asterai::fs::fs;
 #[cfg(not(test))]
-use crate::bindings::asterai::llm::llm::{
-    chat, ChatMessage, ChatRole, ToolCall, ToolDefinition,
-};
+use crate::bindings::asterai::llm::llm::{chat, ChatMessage, ChatRole, ToolCall, ToolDefinition};
 #[cfg(not(test))]
 use crate::bindings::exports::asterbot::types::history::Guest;
 use serde::{Deserialize, Serialize};
@@ -127,9 +125,7 @@ struct CompactionResult {
 impl Guest for Component {
     fn load() -> Vec<ChatMessage> {
         let state = read_state();
-        let start = state
-            .compacted_through
-            .min(state.history.len());
+        let start = state.compacted_through.min(state.history.len());
         state.history[start..]
             .iter()
             .map(|m| m.to_chat_message())
@@ -138,16 +134,12 @@ impl Guest for Component {
 
     fn save(messages: Vec<ChatMessage>) {
         let mut state = read_state();
-        let start = state
-            .compacted_through
-            .min(state.history.len());
+        let start = state.compacted_through.min(state.history.len());
         // Keep the archived portion, replace the working set.
         state.history.truncate(start);
-        state.history.extend(
-            messages
-                .iter()
-                .map(PersistedMessage::from_chat_message),
-        );
+        state
+            .history
+            .extend(messages.iter().map(PersistedMessage::from_chat_message));
         write_state(&state);
     }
 
@@ -169,17 +161,15 @@ impl Guest for Component {
     }
 
     fn compact(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
-        let model =
-            std::env::var("ASTERBOT_MODEL").unwrap_or_default();
+        let model = std::env::var("ASTERBOT_MODEL").unwrap_or_default();
         if model.is_empty() {
             return messages;
         }
 
-        let keep_turns =
-            std::env::var("ASTERBOT_KEEP_RECENT_TURNS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(DEFAULT_KEEP_RECENT_TURNS);
+        let keep_turns = std::env::var("ASTERBOT_KEEP_RECENT_TURNS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_KEEP_RECENT_TURNS);
 
         let roles: Vec<&str> = messages
             .iter()
@@ -214,20 +204,14 @@ impl Guest for Component {
         let response = chat(&prompt, &tools, &model);
 
         // Parse the structured tool call response.
-        let llm_ok = if let Some(tc) =
-            response.tool_calls.first()
-        {
-            match serde_json::from_str::<CompactionResult>(
-                &tc.arguments_json,
-            ) {
+        let llm_ok = if let Some(tc) = response.tool_calls.first() {
+            match serde_json::from_str::<CompactionResult>(&tc.arguments_json) {
                 Ok(result) => {
                     if !result.conversation_summary.is_empty() {
-                        state.conversation_summary =
-                            result.conversation_summary;
+                        state.conversation_summary = result.conversation_summary;
                     }
                     if !result.user_profile.is_empty() {
-                        state.user_summary =
-                            result.user_profile;
+                        state.user_summary = result.user_profile;
                     }
                     if !result.bond.is_empty() {
                         state.bond_summary = result.bond;
@@ -258,8 +242,7 @@ impl Guest for Component {
             } else {
                 state.conversation_summary = format!(
                     "{}\n\n[auto-compacted]\n{}",
-                    state.conversation_summary,
-                    fallback,
+                    state.conversation_summary, fallback,
                 );
             }
         }
@@ -276,34 +259,29 @@ impl Guest for Component {
 /// messages (and everything after them). Returns the
 /// index of the oldest kept user message, or 0 if there
 /// aren't enough turns to justify compaction.
-fn find_cut_point(
-    roles: &[&str],
-    keep_turns: usize,
-) -> usize {
+fn find_cut_point(roles: &[&str], keep_turns: usize) -> usize {
     let user_indices: Vec<usize> = roles
         .iter()
         .enumerate()
         .filter(|(_, r)| **r == "user")
         .map(|(i, _)| i)
         .collect();
-
-    if user_indices.len() <= keep_turns {
+    // Need at least 2 user turns to compact anything.
+    if user_indices.len() <= 1 {
         return 0;
     }
-
+    // Keep at most keep_turns, but always compact at least 1.
+    let keep = keep_turns.min(user_indices.len() - 1);
     // Cut at the oldest user message we want to keep.
     // Everything before it gets compacted.
-    user_indices[user_indices.len() - keep_turns]
+    user_indices[user_indices.len() - keep]
 }
 
 fn format_context(state: &ConversationState) -> String {
     let mut parts = Vec::new();
 
     if !state.user_summary.is_empty() {
-        parts.push(format!(
-            "## User\n{}",
-            state.user_summary,
-        ));
+        parts.push(format!("## User\n{}", state.user_summary,));
     }
     if !state.conversation_summary.is_empty() {
         parts.push(format!(
@@ -312,55 +290,33 @@ fn format_context(state: &ConversationState) -> String {
         ));
     }
     if !state.bond_summary.is_empty() {
-        parts.push(format!(
-            "## Bond\n{}",
-            state.bond_summary,
-        ));
+        parts.push(format!("## Bond\n{}", state.bond_summary,));
     }
 
     parts.join("\n\n")
 }
 
 #[cfg(not(test))]
-fn format_messages_for_summary(
-    messages: &[ChatMessage],
-) -> String {
+fn format_messages_for_summary(messages: &[ChatMessage]) -> String {
     let mut out = String::new();
     for msg in messages {
         match msg.role {
             ChatRole::System => {}
             ChatRole::User => {
-                out.push_str(&format!(
-                    "[user]: {}\n\n",
-                    msg.content,
-                ));
+                out.push_str(&format!("[user]: {}\n\n", msg.content,));
             }
             ChatRole::Assistant => {
                 if !msg.content.is_empty() {
-                    out.push_str(&format!(
-                        "[assistant]: {}\n\n",
-                        msg.content,
-                    ));
+                    out.push_str(&format!("[assistant]: {}\n\n", msg.content,));
                 }
                 for tc in &msg.tool_calls {
-                    let args = truncate_str(
-                        &tc.arguments_json,
-                        TOOL_RESULT_PREVIEW_CHARS,
-                    );
-                    out.push_str(&format!(
-                        "[tool_call]: {}({})\n\n",
-                        tc.name, args,
-                    ));
+                    let args = truncate_str(&tc.arguments_json, TOOL_RESULT_PREVIEW_CHARS);
+                    out.push_str(&format!("[tool_call]: {}({})\n\n", tc.name, args,));
                 }
             }
             ChatRole::Tool => {
-                let preview = truncate_str(
-                    &msg.content,
-                    TOOL_RESULT_PREVIEW_CHARS,
-                );
-                out.push_str(&format!(
-                    "[tool_result]: {preview}\n\n",
-                ));
+                let preview = truncate_str(&msg.content, TOOL_RESULT_PREVIEW_CHARS);
+                out.push_str(&format!("[tool_result]: {preview}\n\n",));
             }
         }
     }
@@ -440,7 +396,11 @@ fn build_compaction_prompt(
     };
 
     fn or_none(s: &str) -> &str {
-        if s.is_empty() { "None yet." } else { s }
+        if s.is_empty() {
+            "None yet."
+        } else {
+            s
+        }
     }
 
     let user_msg = ChatMessage {
@@ -466,12 +426,8 @@ fn build_compaction_prompt(
 fn history_path() -> String {
     let dir = std::env::var("ASTERBOT_HOST_DIR")
         .or_else(|_| {
-            std::env::var("ASTERAI_ALLOWED_DIRS").map(|dirs| {
-                dirs.split(':')
-                    .next()
-                    .unwrap_or_default()
-                    .to_string()
-            })
+            std::env::var("ASTERAI_ALLOWED_DIRS")
+                .map(|dirs| dirs.split(':').next().unwrap_or_default().to_string())
         })
         .unwrap_or_default();
     if dir.is_empty() {
@@ -494,9 +450,7 @@ fn read_state() -> ConversationState {
     };
     // If the file is malformed or an old format, start fresh.
     serde_json::from_str(&contents).unwrap_or_else(|e| {
-        eprintln!(
-            "warning: resetting {path} (parse error: {e})"
-        );
+        eprintln!("warning: resetting {path} (parse error: {e})");
         ConversationState::default()
     })
 }
@@ -506,18 +460,12 @@ fn write_state(state: &ConversationState) {
     let path = history_path();
     match serde_json::to_string_pretty(state) {
         Ok(json) => {
-            if let Err(e) =
-                fs::write(&path, json.as_bytes())
-            {
-                eprintln!(
-                    "error: failed to write {path}: {e}"
-                );
+            if let Err(e) = fs::write(&path, json.as_bytes()) {
+                eprintln!("error: failed to write {path}: {e}");
             }
         }
         Err(e) => {
-            eprintln!(
-                "error: failed to serialise state: {e}"
-            );
+            eprintln!("error: failed to serialise state: {e}");
         }
     }
 }
@@ -558,10 +506,7 @@ mod tests {
         }
     }
 
-    fn assistant_tool_call(
-        call_id: &str,
-        name: &str,
-    ) -> PersistedMessage {
+    fn assistant_tool_call(call_id: &str, name: &str) -> PersistedMessage {
         PersistedMessage {
             role: "assistant".to_string(),
             content: String::new(),
@@ -574,10 +519,7 @@ mod tests {
         }
     }
 
-    fn tool_result(
-        content: &str,
-        call_id: &str,
-    ) -> PersistedMessage {
+    fn tool_result(content: &str, call_id: &str) -> PersistedMessage {
         PersistedMessage {
             role: "tool".to_string(),
             content: content.to_string(),
@@ -592,16 +534,10 @@ mod tests {
 
     /// Simulate what core does: load → compact → save.
     /// Returns (state_after, working_set_returned_to_core).
-    fn simulate_compact(
-        state: &mut ConversationState,
-        keep_turns: usize,
-    ) -> Vec<PersistedMessage> {
+    fn simulate_compact(state: &mut ConversationState, keep_turns: usize) -> Vec<PersistedMessage> {
         // load: return history[compactedThrough..]
-        let start = state
-            .compacted_through
-            .min(state.history.len());
-        let working_set: Vec<PersistedMessage> =
-            state.history[start..].to_vec();
+        let start = state.compacted_through.min(state.history.len());
+        let working_set: Vec<PersistedMessage> = state.history[start..].to_vec();
 
         // compact
         let r = roles(&working_set);
@@ -611,8 +547,7 @@ mod tests {
         }
 
         state.compacted_through += cut;
-        state.conversation_summary =
-            format!("Compacted through turn {}", state.compacted_through);
+        state.conversation_summary = format!("Compacted through turn {}", state.compacted_through);
 
         // Return the trimmed working set
         working_set[cut..].to_vec()
@@ -620,27 +555,26 @@ mod tests {
 
     /// Simulate what core does after compact: add new
     /// turn and save.
-    fn simulate_save(
-        state: &mut ConversationState,
-        working_set: &[PersistedMessage],
-    ) {
-        let start = state
-            .compacted_through
-            .min(state.history.len());
+    fn simulate_save(state: &mut ConversationState, working_set: &[PersistedMessage]) {
+        let start = state.compacted_through.min(state.history.len());
         state.history.truncate(start);
         state.history.extend_from_slice(working_set);
     }
-
 
     #[test]
     fn cut_point_basic() {
         // 5 user turns, keep 3
         let msgs = vec![
-            user("1"), assistant("r1"),
-            user("2"), assistant("r2"),
-            user("3"), assistant("r3"),
-            user("4"), assistant("r4"),
-            user("5"), assistant("r5"),
+            user("1"),
+            assistant("r1"),
+            user("2"),
+            assistant("r2"),
+            user("3"),
+            assistant("r3"),
+            user("4"),
+            assistant("r4"),
+            user("5"),
+            assistant("r5"),
         ];
         let r = roles(&msgs);
         // Keep last 3 users (3,4,5) at indices 4,6,8. Cut at 4.
@@ -649,12 +583,25 @@ mod tests {
 
     #[test]
     fn cut_point_not_enough_turns() {
-        // 3 user turns, keep 3 → nothing to compact
+        // 3 user turns, keep 3 → still compacts 1 turn
+        // (keep is capped to user_turns - 1)
         let msgs = vec![
-            user("1"), assistant("r1"),
-            user("2"), assistant("r2"),
-            user("3"), assistant("r3"),
+            user("1"),
+            assistant("r1"),
+            user("2"),
+            assistant("r2"),
+            user("3"),
+            assistant("r3"),
         ];
+        let r = roles(&msgs);
+        // keep = min(3, 2) = 2, cut at user_indices[1] = 2
+        assert_eq!(find_cut_point(&r, 3), 2);
+    }
+
+    #[test]
+    fn cut_point_single_user_turn() {
+        // 1 user turn → nothing to compact
+        let msgs = vec![user("1"), assistant("r1")];
         let r = roles(&msgs);
         assert_eq!(find_cut_point(&r, 3), 0);
     }
@@ -663,10 +610,14 @@ mod tests {
     fn cut_point_exactly_one_more() {
         // 4 user turns, keep 3 → compact 1 turn
         let msgs = vec![
-            user("1"), assistant("r1"),
-            user("2"), assistant("r2"),
-            user("3"), assistant("r3"),
-            user("4"), assistant("r4"),
+            user("1"),
+            assistant("r1"),
+            user("2"),
+            assistant("r2"),
+            user("3"),
+            assistant("r3"),
+            user("4"),
+            assistant("r4"),
         ];
         let r = roles(&msgs);
         // Keep last 3 (2,3,4) at indices 2,4,6. Cut at 2.
@@ -676,16 +627,16 @@ mod tests {
     #[test]
     fn cut_point_with_tool_calls() {
         let msgs = vec![
-            user("1"),                                 // 0
-            assistant_tool_call("c1", "search"),       // 1
-            tool_result("found it", "c1"),             // 2
-            assistant("Here's what I found"),          // 3
-            user("2"),                                 // 4
-            assistant("r2"),                           // 5
-            user("3"),                                 // 6
-            assistant("r3"),                           // 7
-            user("4"),                                 // 8
-            assistant("r4"),                           // 9
+            user("1"),                           // 0
+            assistant_tool_call("c1", "search"), // 1
+            tool_result("found it", "c1"),       // 2
+            assistant("Here's what I found"),    // 3
+            user("2"),                           // 4
+            assistant("r2"),                     // 5
+            user("3"),                           // 6
+            assistant("r3"),                     // 7
+            user("4"),                           // 8
+            assistant("r4"),                     // 9
         ];
         let r = roles(&msgs);
         // 4 users at 0, 4, 6, 8. Keep 3 → cut at 4.
@@ -695,25 +646,32 @@ mod tests {
     #[test]
     fn cut_point_keep_1() {
         let msgs = vec![
-            user("1"), assistant("r1"),
-            user("2"), assistant("r2"),
-            user("3"), assistant("r3"),
+            user("1"),
+            assistant("r1"),
+            user("2"),
+            assistant("r2"),
+            user("3"),
+            assistant("r3"),
         ];
         let r = roles(&msgs);
         // Keep 1 → cut at index 4 (user "3")
         assert_eq!(find_cut_point(&r, 1), 4);
     }
 
-
     #[test]
     fn single_compaction_preserves_all_history() {
         let mut state = ConversationState {
             history: vec![
-                user("1"), assistant("r1"),
-                user("2"), assistant("r2"),
-                user("3"), assistant("r3"),
-                user("4"), assistant("r4"),
-                user("5"), assistant("r5"),
+                user("1"),
+                assistant("r1"),
+                user("2"),
+                assistant("r2"),
+                user("3"),
+                assistant("r3"),
+                user("4"),
+                assistant("r4"),
+                user("5"),
+                assistant("r5"),
             ],
             ..Default::default()
         };
@@ -792,16 +750,12 @@ mod tests {
         // when the working set hits threshold.
         for turn in 1..=10 {
             state.history.push(user(&format!("u{turn}")));
-            state
-                .history
-                .push(assistant(&format!("a{turn}")));
+            state.history.push(assistant(&format!("a{turn}")));
 
-            let working_len =
-                state.history.len() - state.compacted_through;
+            let working_len = state.history.len() - state.compacted_through;
 
             if working_len >= threshold {
-                let trimmed =
-                    simulate_compact(&mut state, keep_turns);
+                let trimmed = simulate_compact(&mut state, keep_turns);
                 let mut working = trimmed;
                 // (no new message this cycle, compact happened
                 // before LLM call in the real flow)
@@ -829,12 +783,9 @@ mod tests {
 
         for turn in 1..=20 {
             state.history.push(user(&format!("u{turn}")));
-            state
-                .history
-                .push(assistant(&format!("a{turn}")));
+            state.history.push(assistant(&format!("a{turn}")));
 
-            let working_len =
-                state.history.len() - state.compacted_through;
+            let working_len = state.history.len() - state.compacted_through;
             if working_len >= 10 {
                 let trimmed = simulate_compact(&mut state, 3);
                 simulate_save(&mut state, &trimmed);
@@ -845,13 +796,9 @@ mod tests {
         assert_eq!(state.history.len(), 40);
         for i in 1..=20 {
             let user_idx = (i - 1) * 2;
-            assert_eq!(
-                state.history[user_idx].content,
-                format!("u{i}"),
-            );
+            assert_eq!(state.history[user_idx].content, format!("u{i}"),);
         }
     }
-
 
     /// Simulate compact where the LLM call fails.
     /// Fallback: raw text summary, advance cursor,
@@ -860,11 +807,8 @@ mod tests {
         state: &mut ConversationState,
         keep_turns: usize,
     ) -> Vec<PersistedMessage> {
-        let start = state
-            .compacted_through
-            .min(state.history.len());
-        let working_set: Vec<PersistedMessage> =
-            state.history[start..].to_vec();
+        let start = state.compacted_through.min(state.history.len());
+        let working_set: Vec<PersistedMessage> = state.history[start..].to_vec();
 
         let r = roles(&working_set);
         let cut = find_cut_point(&r, keep_turns);
@@ -884,8 +828,7 @@ mod tests {
         } else {
             state.conversation_summary = format!(
                 "{}\n\n[auto-compacted]\n{}",
-                state.conversation_summary,
-                fallback,
+                state.conversation_summary, fallback,
             );
         }
 
@@ -904,18 +847,12 @@ mod tests {
 
         for turn in 1..=10 {
             state.history.push(user(&format!("u{turn}")));
-            state
-                .history
-                .push(assistant(&format!("a{turn}")));
+            state.history.push(assistant(&format!("a{turn}")));
 
-            let working_len =
-                state.history.len() - state.compacted_through;
+            let working_len = state.history.len() - state.compacted_through;
 
             if working_len >= threshold {
-                let trimmed = simulate_compact_llm_fails(
-                    &mut state,
-                    keep_turns,
-                );
+                let trimmed = simulate_compact_llm_fails(&mut state, keep_turns);
                 simulate_save(&mut state, &trimmed);
             }
         }
@@ -928,8 +865,7 @@ mod tests {
             state.compacted_through,
         );
         // Working set should be bounded
-        let working_len =
-            state.history.len() - state.compacted_through;
+        let working_len = state.history.len() - state.compacted_through;
         assert!(
             working_len < state.history.len(),
             "working set ({working_len}) should be smaller \
@@ -948,24 +884,17 @@ mod tests {
 
         for turn in 1..=15 {
             state.history.push(user(&format!("u{turn}")));
-            state
-                .history
-                .push(assistant(&format!("a{turn}")));
+            state.history.push(assistant(&format!("a{turn}")));
 
-            let working_len =
-                state.history.len() - state.compacted_through;
+            let working_len = state.history.len() - state.compacted_through;
 
             if working_len >= threshold {
-                let trimmed = simulate_compact_llm_fails(
-                    &mut state,
-                    keep_turns,
-                );
+                let trimmed = simulate_compact_llm_fails(&mut state, keep_turns);
                 simulate_save(&mut state, &trimmed);
             }
         }
 
-        let working_len =
-            state.history.len() - state.compacted_through;
+        let working_len = state.history.len() - state.compacted_through;
         // Working set should stay roughly bounded: at most
         // threshold + one turn of headroom (2 messages).
         assert!(
@@ -990,19 +919,13 @@ mod tests {
 
         for turn in 1..=15 {
             state.history.push(user(&format!("u{turn}")));
-            state
-                .history
-                .push(assistant(&format!("a{turn}")));
+            state.history.push(assistant(&format!("a{turn}")));
 
-            let working_len =
-                state.history.len() - state.compacted_through;
+            let working_len = state.history.len() - state.compacted_through;
 
             if working_len >= threshold {
                 compact_attempts += 1;
-                let trimmed = simulate_compact_llm_fails(
-                    &mut state,
-                    keep_turns,
-                );
+                let trimmed = simulate_compact_llm_fails(&mut state, keep_turns);
                 simulate_save(&mut state, &trimmed);
             }
         }
@@ -1019,7 +942,6 @@ mod tests {
              every turn (~11 times)",
         );
     }
-
 
     #[test]
     fn state_serializes_camel_case() {
@@ -1047,10 +969,8 @@ mod tests {
             user_summary: "user".into(),
             bond_summary: "bond".into(),
         };
-        let json =
-            serde_json::to_string_pretty(&state).unwrap();
-        let parsed: ConversationState =
-            serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string_pretty(&state).unwrap();
+        let parsed: ConversationState = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.compacted_through, 5);
         assert_eq!(parsed.conversation_summary, "summary");
@@ -1060,11 +980,9 @@ mod tests {
     #[test]
     fn old_array_format_fails_parse() {
         let old = r#"[{"role":"user","content":"hi"}]"#;
-        let result: Result<ConversationState, _> =
-            serde_json::from_str(old);
+        let result: Result<ConversationState, _> = serde_json::from_str(old);
         assert!(result.is_err());
     }
-
 
     #[test]
     fn context_empty_when_no_summaries() {
@@ -1085,7 +1003,6 @@ mod tests {
         assert!(ctx.contains("## Conversation so far\nTalked about Rust"));
         assert!(ctx.contains("## Bond\nTechnical rapport"));
     }
-
 
     #[test]
     fn truncate_short_string() {
