@@ -37,9 +37,9 @@ struct Component;
 struct WitChatMessage {
     role: String,
     content: String,
-    #[serde(rename = "tool-calls", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "tool-calls", default)]
     tool_calls: Vec<WitToolCall>,
-    #[serde(rename = "tool-call-id", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tool-call-id", default)]
     tool_call_id: Option<String>,
 }
 
