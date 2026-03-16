@@ -404,8 +404,9 @@ fn build_compaction_prompt(
         tool_call_id: None,
     };
 
-    let or_none =
-        |s: &str| if s.is_empty() { "None yet." } else { s };
+    fn or_none(s: &str) -> &str {
+        if s.is_empty() { "None yet." } else { s }
+    }
 
     let user_msg = ChatMessage {
         role: ChatRole::User,
