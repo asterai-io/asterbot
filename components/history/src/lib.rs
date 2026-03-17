@@ -1,5 +1,6 @@
 #[cfg(not(test))]
 use crate::bindings::asterai::fs::fs;
+use crate::bindings::asterai::llm::llm::ChatResponse;
 #[cfg(not(test))]
 use crate::bindings::asterai::llm::llm::{chat, ChatMessage, ChatRole, ToolCall, ToolDefinition};
 #[cfg(not(test))]
@@ -177,37 +178,9 @@ impl Guest for Component {
         let tools = vec![build_compaction_tool()];
         let response = chat(&prompt, &tools, &model);
         // Parse the structured tool call response.
-        let llm_ok = if let Some(tc) = response.tool_calls.first() {
-            match serde_json::from_str::<CompactionResult>(&tc.arguments_json) {
-                Ok(result) => {
-                    if !result.conversation_summary.is_empty() {
-                        state.conversation_summary = result.conversation_summary;
-                    }
-                    if !result.user_profile.is_empty() {
-                        state.user_summary = result.user_profile;
-                    }
-                    if !result.bond.is_empty() {
-                        state.bond_summary = result.bond;
-                    }
-                    true
-                }
-                Err(e) => {
-                    eprintln!(
-                        "error: failed to parse compaction \
-                         result: {e}"
-                    );
-                    false
-                }
-            }
-        } else {
-            eprintln!(
-                "error: compaction LLM did not return \
-                 a tool call"
-            );
-            false
-        };
+        let did_succeed = apply_compaction_from_llm_response(response, &mut state);
         // Fallback: raw text summary when LLM fails.
-        if !llm_ok {
+        if !did_succeed {
             let fallback = truncate_str(&formatted, 500);
             if state.conversation_summary.is_empty() {
                 state.conversation_summary = fallback;
@@ -222,6 +195,43 @@ impl Guest for Component {
         state.compacted_through += old.len();
         write_state(&state);
         vec![]
+    }
+}
+
+#[cfg(not(test))]
+fn apply_compaction_from_llm_response(
+    response: ChatResponse,
+    state: &mut ConversationState,
+) -> bool {
+    match response.tool_calls.first() {
+        Some(tc) => match serde_json::from_str::<CompactionResult>(&tc.arguments_json) {
+            Ok(result) => {
+                if !result.conversation_summary.is_empty() {
+                    state.conversation_summary = result.conversation_summary;
+                }
+                if !result.user_profile.is_empty() {
+                    state.user_summary = result.user_profile;
+                }
+                if !result.bond.is_empty() {
+                    state.bond_summary = result.bond;
+                }
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "error: failed to parse compaction \
+                             result: {e}"
+                );
+                false
+            }
+        },
+        None => {
+            eprintln!(
+                "error: compaction LLM did not return \
+                     a tool call"
+            );
+            false
+        }
     }
 }
 
