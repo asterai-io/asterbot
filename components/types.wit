@@ -1,4 +1,4 @@
-package asterbot:types@1.1.0;
+package asterbot:types@1.2.0;
 
 /// Shared types used across asterbot components.
 interface types {
@@ -154,6 +154,47 @@ interface history {
   /// cursor, and return the trimmed working set.
   compact: func(messages: list<chat-message>)
     -> list<chat-message>;
+}
+
+/// Tool hook interface for intercepting tool calls.
+/// Components implementing this interface are called
+/// before and after every tool invocation, enabling
+/// security gating, tracing, rate limiting, etc.
+///
+/// Hook components are discovered automatically by
+/// toolkit via the host API. Any component that exports
+/// this interface will be called as a hook.
+interface tool-hook {
+  /// The result of a before-call hook.
+  enum hook-result {
+    /// Allow the tool call to proceed.
+    allow,
+    /// Deny the tool call.
+    deny,
+  }
+
+  /// Response from a before-call hook.
+  record hook-response {
+    /// Whether to allow or deny.
+    result: hook-result,
+    /// Optional message (e.g. denial reason).
+    message: option<string>,
+  }
+
+  /// Called before a tool function is executed.
+  before-call: func(
+    component: string,
+    function-name: string,
+    args: string,
+  ) -> hook-response;
+
+  /// Called after a tool function has executed.
+  after-call: func(
+    component: string,
+    function-name: string,
+    args: string,
+    result: string,
+  );
 }
 
 world asterbot {
