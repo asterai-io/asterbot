@@ -3,6 +3,8 @@ use crate::bindings::asterbot::types::types::ToolParam;
 use crate::bindings::exports::asterbot::types::toolkit::{Guest, ToolInfo};
 use serde_json::Value;
 
+const HOOK_INTERFACE: &str = "asterbot:types/tool-hook";
+
 #[allow(warnings)]
 mod bindings {
     wit_bindgen::generate!({
@@ -14,8 +16,6 @@ mod bindings {
 
 struct Component;
 
-const SKIP_INTERFACES: &[&str] = &["agent", "core", "toolkit", "types", "api"];
-
 impl Guest for Component {
     fn list_tools() -> Vec<ToolInfo> {
         let mut tools = Vec::new();
@@ -24,10 +24,6 @@ impl Guest for Component {
                 continue;
             };
             for f in &info.functions {
-                let iface = f.interface_name.as_deref().unwrap_or("");
-                if SKIP_INTERFACES.contains(&iface) {
-                    continue;
-                }
                 let function_name = match &f.interface_name {
                     Some(iface) => format!("{iface}/{}", f.name),
                     None => f.name.clone(),
@@ -65,14 +61,22 @@ impl Guest for Component {
                 component_name,
             );
         }
+        let hooks = discover_hook_components();
+        if let Some(deny_msg) =
+            run_before_hooks(&hooks, &component_name, &function_name, &args_json)
+        {
+            return deny_msg;
+        }
         let args = convert_args_to_array(&component_name, &function_name, &args_json);
-        match api::call_component_function(&component_name, &function_name, &args) {
+        let result = match api::call_component_function(&component_name, &function_name, &args) {
             Ok(result) => result,
             Err(e) => format!(
                 "error: {}/{} failed ({:?}): {}",
                 component_name, function_name, e.kind, e.message,
             ),
-        }
+        };
+        run_after_hooks(&hooks, &component_name, &function_name, &args_json, &result);
+        result
     }
 
     fn format_tools_for_prompt() -> String {
@@ -144,6 +148,67 @@ fn tool_component_names() -> Vec<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+fn discover_hook_components() -> Vec<String> {
+    api::list_other_components()
+        .into_iter()
+        .filter(|c| {
+            c.interfaces
+                .iter()
+                .any(|i| i.split('@').next().is_some_and(|name| name == HOOK_INTERFACE))
+        })
+        .map(|c| c.name)
+        .collect()
+}
+
+/// Runs before-call hooks.
+/// Returns Some(error message) if any hook denied, None if all allowed.
+fn run_before_hooks(
+    hooks: &[String],
+    component: &str,
+    function: &str,
+    args: &str,
+) -> Option<String> {
+    for hook in hooks {
+        let call_args = serde_json::json!([component, function, args]).to_string();
+        match api::call_component_function(hook, "tool-hook/before-call", &call_args) {
+            Ok(result) => {
+                if let Ok(resp) = serde_json::from_str::<Value>(&result) {
+                    let denied = resp
+                        .get("result")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|r| r == "deny");
+                    if denied {
+                        let msg = resp
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("denied by hook");
+                        return Some(format!("error: {msg}"));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "warning: hook {hook} before-call failed: {:?}: {}",
+                    e.kind, e.message,
+                );
+            }
+        }
+    }
+    None
+}
+
+fn run_after_hooks(hooks: &[String], component: &str, function: &str, args: &str, result: &str) {
+    for hook in hooks {
+        let call_args = serde_json::json!([component, function, args, result]).to_string();
+        if let Err(e) = api::call_component_function(hook, "tool-hook/after-call", &call_args) {
+            eprintln!(
+                "warning: hook {hook} after-call failed: {:?}: {}",
+                e.kind, e.message,
+            );
+        }
+    }
 }
 
 bindings::export!(Component with_types_in bindings);
