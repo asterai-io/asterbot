@@ -1,0 +1,32 @@
+package asterbot:tool-gate@0.1.0;
+
+/// API for managing permissions and pending approval
+/// requests. Called by the UI through the runtime's
+/// call endpoint.
+interface api {
+    /// List pending approval requests as JSON.
+    list-pending: func() -> string;
+
+    /// Confirm or deny a pending request.
+    /// Action: "approve_once", "approve_always", "deny".
+    confirm: func(id: string, action: string) -> string;
+
+    /// Get current permissions as JSON.
+    get-permissions: func() -> string;
+
+    /// Update a single permission.
+    /// Key: "component/function", value: "allow" or "deny".
+    update-permission: func(key: string, value: string) -> string;
+
+    /// Remove a permission, reverting it to the default
+    /// (requires approval each time).
+    remove-permission: func(key: string) -> string;
+}
+
+world component {
+  import asterai:host/api@1.0.0;
+  import asterai:fs/fs@1.0.0;
+
+  export asterbot:types/tool-hook@1.2.0;
+  export api;
+}

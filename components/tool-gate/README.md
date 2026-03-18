@@ -5,22 +5,31 @@ can execute by enforcing a permission model where every tool function is either
 pre-authorized or requires user approval before execution.
 
 Implements the `tool-hook` interface (called by toolkit before/after every tool
-call) and `wasi:http/incoming-handler` (serves a UI API for managing permissions
-and approving pending requests).
+call) and `api` (for managing permissions and approving pending requests
+via the runtime's call endpoint).
 
 ## How it works
 
-The gate classifies every tool function into one of three states:
+Every tool function falls into one of two configured states, or the default:
 
-- **Pre-authorized** — the function executes immediately (`allow`).
-- **Requires approval** — the gate blocks and waits for the user to approve or
-  deny via the HTTP API.
-- **Denied** — the function is permanently blocked (`deny`). The user must
-  change this from the UI.
+- **allow** — the function executes immediately.
+- **deny** — the function is permanently blocked. Must be changed from the UI.
+- **not listed** (default) — the gate blocks and waits for the user to approve
+  or deny via the api.
 
-Permissions are stored in an HMAC-signed file via `asterai:fs`. If the file is
-missing, corrupted, or the signature is invalid, all functions default to
-requiring approval (fail-safe).
+All state is stored in the `tool-gate/` directory and encrypted with AES-256-GCM
+using the configured secret. If any file is missing, corrupted, or cannot be
+decrypted, the gate falls back to safe defaults (all functions require approval).
+
+## Security model
+
+- **Encryption** — all files in `tool-gate/` are encrypted. The LLM cannot
+  read or write meaningful content even if it has filesystem access.
+- **Nonce-based replay protection** — each pending request contains a unique
+  nonce (UUIDv7) held in process memory during the blocking poll. When the
+  user confirms, the nonce is preserved in the updated encrypted file. The
+  polling loop verifies the nonce matches before accepting. A replayed file
+  from a previous session will have a stale nonce that doesn't match.
 
 ## Workflow example
 
@@ -29,51 +38,57 @@ The LLM wants to call `email/send` and it is not pre-authorized:
 1. Core's agent loop: LLM returns a tool call for `email/send` with args
    `{to: "alice@example.com", subject: "Hello", body: "..."}`.
 2. Core calls `toolkit/call-tool`.
-3. Toolkit iterates hooks, calls `gate.before-call("email-component",
-   "email/send", args)`.
-4. Gate checks the permissions file — `email/send` is not pre-authorized.
-5. Gate writes a pending request to the filesystem:
-   `{id: "abc123", component, function, args, status: "pending"}`.
-6. Gate starts polling the filesystem for a response to `abc123`.
-7. The agent is now blocked here.
-8. UI polls `GET /pending` on the gate's HTTP endpoint, sees the request.
-9. UI presents it to the user: "Aster wants to send an email to
-   alice@example.com — [Approve Once] [Always Allow] [Deny]".
-10. User clicks one of the options.
-11. UI sends `POST /confirm/abc123` with the user's choice.
-12. Gate's HTTP handler writes the response to the filesystem (and if
-    "Always Allow", updates the permissions file).
-13. Gate's polling loop picks up the response.
-14. Gate returns `allow` or `deny` to toolkit.
-15. Toolkit proceeds with or rejects the tool call — business as usual.
+3. Toolkit discovers the tool-gate component (it exports `tool-hook`).
+4. Toolkit calls `gate.before-call("email-component", "email/send", args)`.
+5. Gate checks permissions — `email/send` is not listed (defaults to require
+   approval).
+6. Gate generates a nonce (UUIDv7), holds it in a local variable.
+7. Gate writes an encrypted pending request to `tool-gate/pending/{id}.bin`.
+8. Gate starts polling the file for a status change.
+9. The agent is now blocked here.
+10. UI polls `api/list-pending` via the runtime call endpoint, sees the
+    request (decrypted and returned without the nonce).
+11. UI presents it to the user: "Aster wants to send an email to
+    alice@example.com — [Approve Once] [Always Allow] [Deny]".
+12. User clicks one of the options.
+13. UI calls `api/confirm` with the request ID and the user's choice.
+14. Gate reads the encrypted pending file, updates the status, re-encrypts
+    and writes it back (and if "Always Allow", updates permissions too).
+15. Gate's polling loop reads the file, verifies the nonce matches, sees the
+    new status.
+16. Gate returns `allow` or `deny` to toolkit.
+17. Toolkit proceeds with or rejects the tool call.
 
 From core's perspective, nothing special happened — `call_tool` just took a
 while to return.
 
-## Startup
+## Startup cleanup
 
-On startup (`wasi:cli/run`), the gate clears all pending requests from the
-filesystem. If the agent was redeployed mid-block, the LLM loop that initiated
-the tool call is gone, so pending approvals are meaningless. If the action was
-important, the user will ask the agent again.
+On first invocation after deployment, the gate clears all pending requests.
+If the agent was redeployed mid-block, the LLM loop that initiated the tool
+call is gone, so pending approvals are meaningless.
 
-## HTTP API
+## Gate API
 
-The gate component implements `wasi:http/incoming-handler` to serve:
+Callable through the asterai runtime's call endpoint:
 
-- `GET /pending` — list all pending approval requests.
-- `POST /confirm/:id` — approve or deny a pending request.
-  Body: `{"action": "approve_once" | "approve_always" | "deny"}`.
-- `GET /permissions` — list current function permissions.
-- `POST /permissions` — update function permissions.
+- `list-pending() -> string` — list pending approval requests as JSON.
+- `confirm(id, action) -> string` — resolve a pending request.
+  Action: `"approve_once"`, `"approve_always"`, or `"deny"`.
+- `get-permissions() -> string` — list current function permissions as JSON.
+- `update-permission(key, value) -> string` — set a permission.
+  Key: `"component/function"`, value: `"allow"` or `"deny"`.
+- `remove-permission(key) -> string` — remove a permission (reverts to
+  requiring approval).
 
 ## Configuration
 
-- `ASTERBOT_TOOL_GATE_SECRET` — HMAC secret for signing the permissions file.
-  If unset, permissions are stored unsigned (development only).
+- `ASTERBOT_TOOL_GATE_SECRET` — encryption key for all gate state. Required
+  for production use.
+- `ASTERBOT_TOOL_GATE_TIMEOUT` — seconds to wait for user approval before
+  auto-denying (default: 300).
 
 ## Interfaces
 
-- Exports: `asterbot:types/tool-hook`, `wasi:http/incoming-handler`,
-  `wasi:cli/run`.
+- Exports: `asterbot:types/tool-hook`, `api`.
 - Imports: `asterai:host/api`, `asterai:fs/fs`.
