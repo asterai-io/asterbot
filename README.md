@@ -53,16 +53,20 @@ User
 │  asterbot:core    │  The brain. Agent loop: build prompt,
 └──┬──────┬────────┘  call LLM, parse tool calls, loop.
    │      │
-   │      ▼
-   │  ┌──────────────────┐
-   │  │ asterbot:toolkit  │  Discovers tools in the environment
-   │  └──┬───────────────┘  via host API reflection.
-   │     │
-   │     ▼
-   │  ┌──────────────────┐
-   │  │ Tool components   │  Any WASM component: web search,
-   │  │ (user-provided)   │  memory, skills, soul, APIs, ...
-   │  └──────────────────┘
+   │      │
+   │      ├───▶┌──────────────────┐
+   │      │    │ asterbot:toolkit  │  Discovers tools in the environment
+   │      │    └──┬───────────────┘  via host API reflection.
+   │      │       │
+   │      │       ▼
+   │      │    ┌──────────────────┐
+   │      │    │ Tool components   │  Any WASM component: web search,
+   │      │    │ (user-provided)   │  memory, skills, soul, APIs, ...
+   │      │    └──────────────────┘
+   │      │
+   │      └───▶┌──────────────────┐
+   │           │ asterbot:history  │  Conversation persistence &
+   │           └──────────────────┘  automatic compaction.
    │
    ▼
 ┌──────────────────┐
@@ -109,8 +113,12 @@ asterai env add-component asterbot asterbot:soul
 asterai env add-component asterbot asterbot:memory
 # Allows automatic skill retrieval into the context window.
 asterai env add-component asterbot asterbot:skills
+# Conversation history with automatic compaction.
+asterai env add-component asterbot asterbot:history
 # Allows the agent to read and write files under its directory.
 asterai env add-component asterbot asterai:cli
+# Access to the local disk (required if using history or cli).
+asterai env add-component asterbot asterai:fs-local
 
 # Other tools (example; you can add any component as a tool)
 asterai env add-component asterbot asterai:firecrawl
@@ -217,7 +225,8 @@ they can't access host resources unless explicitly granted.
 
 All asterbot components are published to the registry and can be browsed at
 [asterai.io/asterbot](https://asterai.io/asterbot)
-(e.g. [asterbot:memory](https://asterai.io/asterbot/memory)).
+(e.g. [asterbot:memory](https://asterai.io/asterbot/memory),
+[asterbot:history](https://asterai.io/asterbot/history)).
 
 ## 🔑 Why Asterbot
 
